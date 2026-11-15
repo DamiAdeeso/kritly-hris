@@ -1,0 +1,579 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["hris"]
+}
+
+model Person {
+  id            String   @id
+  full_name     String
+  email         String   @unique
+  password_hash String
+  is_director   Int      @default(0)
+  is_founder    Int      @default(0)
+  created_at    String
+
+  roles                    PersonRole[]
+  affiliatesAsSubject      Affiliate[]              @relation("AffiliateSubject")
+  affiliatesAsRelated      Affiliate[]              @relation("AffiliateRelated")
+  employment               Employment?
+  sessions                 Session[]
+  policyVersions           PolicyVersion[]
+  auditEvents              AuditEvent[]
+  initiativeUpdates        InitiativeStatusUpdate[]
+  sealedSheets             SealedScoreSheet[]
+  scoreDrafts              ScoreDraft[]
+  adoptionBallots          AdoptionBallot[]
+  assignmentBallots        AssignmentBallot[]
+  companyAccountsCreated   CompanyAccount[]
+  cashCallsCreated         CashCall[]
+  cashCallLines            CashCallLine[]
+  cashCallPaymentsRecorded CashCallPayment[]
+  notifications            Notification[]
+  evidenceFiles            EvidenceFile[]
+  planNotes                PlanNote[]
+  planBallots              PlanBallot[]
+  badLeaverBallots         BadLeaverBallot[]
+
+  @@map("people")
+  @@schema("hris")
+}
+
+model Role {
+  id          String @id
+  key         String @unique
+  name        String
+  description String
+
+  permissions RolePermission[]
+  people      PersonRole[]
+
+  @@map("roles")
+  @@schema("hris")
+}
+
+model Permission {
+  id          String @id
+  key         String @unique
+  description String
+
+  roles RolePermission[]
+
+  @@map("permissions")
+  @@schema("hris")
+}
+
+model RolePermission {
+  role_id       String
+  permission_id String
+  role          Role       @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  permission    Permission @relation(fields: [permission_id], references: [id], onDelete: Cascade)
+
+  @@id([role_id, permission_id])
+  @@map("role_permissions")
+  @@schema("hris")
+}
+
+model PersonRole {
+  person_id String
+  role_id   String
+  person    Person @relation(fields: [person_id], references: [id], onDelete: Cascade)
+  role      Role   @relation(fields: [role_id], references: [id], onDelete: Cascade)
+
+  @@id([person_id, role_id])
+  @@map("person_roles")
+  @@schema("hris")
+}
+
+model Affiliate {
+  person_id         String
+  related_person_id String
+  relationship      String
+  person            Person @relation("AffiliateSubject", fields: [person_id], references: [id], onDelete: Cascade)
+  related           Person @relation("AffiliateRelated", fields: [related_person_id], references: [id], onDelete: Cascade)
+
+  @@id([person_id, related_person_id])
+  @@map("affiliates")
+  @@schema("hris")
+}
+
+model Employment {
+  id                        String  @id
+  person_id                 String  @unique
+  company                   String
+  title                     String
+  category                  String
+  start_date                String
+  qualifying_service        Int     @default(1)
+  subject_to_founder_review Int     @default(0)
+  person                    Person  @relation(fields: [person_id], references: [id], onDelete: Cascade)
+  equityAccount             EquityAccount?
+  initiatives               Initiative[]
+  selfAssessments           SelfAssessment[]
+  sealedSheets              SealedScoreSheet[]
+  scoreDrafts               ScoreDraft[]
+  adoptionBallots           AdoptionBallot[]
+  reviewVotes               ReviewVote[]
+  reviewMemos               ReviewMemo[]
+  consequenceNotices        ConsequenceNotice[]
+  performancePlans          PerformancePlan[]
+
+  @@map("employments")
+  @@schema("hris")
+}
+
+model EquityAccount {
+  id                        String  @id
+  employment_id             String  @unique
+  certificate_or_book_entry String?
+  total_shares              Int     @default(0)
+  past_contribution_shares  Int     @default(0)
+  service_shares            Int     @default(0)
+  vested_shares             Int     @default(0)
+  unvested_shares           Int     @default(0)
+  escrow                    Int     @default(1)
+  vesting_suspended         Int     @default(0)
+  schedule_a_confirmed      Int     @default(0)
+  legends                   String
+  employment                Employment @relation(fields: [employment_id], references: [id], onDelete: Cascade)
+  vestingRecords            VestingRecord[]
+
+  @@map("equity_accounts")
+  @@schema("hris")
+}
+
+model PolicyVersion {
+  id            String  @id
+  version       Int     @unique
+  label         String
+  body_json     String
+  active        Int     @default(0)
+  mutable_notes String?
+  created_by    String?
+  created_at    String
+  creator       Person? @relation(fields: [created_by], references: [id])
+  cycles        ReviewCycle[]
+
+  @@map("policy_versions")
+  @@schema("hris")
+}
+
+model AuditEvent {
+  id          String  @id
+  actor_id    String?
+  action      String
+  entity_type String
+  entity_id   String?
+  before_json String?
+  after_json  String?
+  reason      String?
+  created_at  String
+  actor       Person? @relation(fields: [actor_id], references: [id])
+
+  @@map("audit_events")
+  @@schema("hris")
+}
+
+model Session {
+  token      String @id
+  person_id  String
+  expires_at String
+  person     Person @relation(fields: [person_id], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+  @@schema("hris")
+}
+
+model ReviewCycle {
+  id                         String  @id
+  name                       String
+  period_label               String
+  starts_on                  String
+  ends_on                    String
+  review_deadline            String
+  vesting_date               String
+  policy_version_id          String
+  status                     String
+  ratings_published          Int     @default(0)
+  assignment_adopted_at      String?
+  assignment_adoption_method String?
+  evidence_due_on            String?
+  self_assessment_due_on     String?
+  scores_due_on              String?
+  votes_due_on               String?
+  policyVersion              PolicyVersion @relation(fields: [policy_version_id], references: [id])
+  initiatives                Initiative[]
+  selfAssessments            SelfAssessment[]
+  sealedSheets               SealedScoreSheet[]
+  scoreDrafts                ScoreDraft[]
+  adoptionBallots            AdoptionBallot[]
+  assignmentBallots          AssignmentBallot[]
+  reviewVotes                ReviewVote[]
+  reviewMemos                ReviewMemo[]
+  consequenceNotices         ConsequenceNotice[]
+  performancePlans           PerformancePlan[]
+  vestingRecords             VestingRecord[]
+
+  @@map("review_cycles")
+  @@schema("hris")
+}
+
+model Initiative {
+  id                String @id
+  cycle_id          String
+  employment_id     String
+  title             String
+  company_objective String
+  success_criteria  String
+  start_date        String
+  due_date          String
+  status            String @default("not_started")
+  weight            Float  @default(1)
+  evidence_ref      String?
+  final_score       String?
+  final_evidence    String?
+  cycle             ReviewCycle @relation(fields: [cycle_id], references: [id], onDelete: Cascade)
+  employment        Employment  @relation(fields: [employment_id], references: [id], onDelete: Cascade)
+  statusUpdates     InitiativeStatusUpdate[]
+  evidenceFiles     EvidenceFile[]
+
+  @@map("initiatives")
+  @@schema("hris")
+}
+
+model EvidenceFile {
+  id            String @id
+  initiative_id String
+  original_name String
+  stored_name   String
+  mime          String
+  size_bytes    Int
+  uploaded_by   String
+  created_at    String
+  initiative    Initiative @relation(fields: [initiative_id], references: [id], onDelete: Cascade)
+  uploader      Person     @relation(fields: [uploaded_by], references: [id])
+
+  @@map("evidence_files")
+  @@schema("hris")
+}
+
+model AssignmentBallot {
+  id         String @id
+  cycle_id   String
+  voter_id   String
+  decision   String
+  created_at String
+  cycle      ReviewCycle @relation(fields: [cycle_id], references: [id], onDelete: Cascade)
+  voter      Person      @relation(fields: [voter_id], references: [id])
+
+  @@unique([cycle_id, voter_id])
+  @@map("assignment_ballots")
+  @@schema("hris")
+}
+
+model InitiativeStatusUpdate {
+  id            String @id
+  initiative_id String
+  author_id     String
+  status        String
+  note          String
+  created_at    String
+  initiative    Initiative @relation(fields: [initiative_id], references: [id], onDelete: Cascade)
+  author        Person     @relation(fields: [author_id], references: [id])
+
+  @@map("initiative_status_updates")
+  @@schema("hris")
+}
+
+model SelfAssessment {
+  id            String @id
+  cycle_id      String
+  employment_id String
+  body_json     String
+  created_at    String
+  cycle         ReviewCycle @relation(fields: [cycle_id], references: [id], onDelete: Cascade)
+  employment    Employment  @relation(fields: [employment_id], references: [id], onDelete: Cascade)
+
+  @@unique([cycle_id, employment_id])
+  @@map("self_assessments")
+  @@schema("hris")
+}
+
+model SealedScoreSheet {
+  id                     String @id
+  cycle_id               String
+  subject_employment_id  String
+  scorer_person_id       String
+  body_json              String
+  sealed                 Int    @default(1)
+  created_at             String
+  cycle                  ReviewCycle @relation(fields: [cycle_id], references: [id], onDelete: Cascade)
+  subjectEmployment      Employment  @relation(fields: [subject_employment_id], references: [id], onDelete: Cascade)
+  scorer                 Person      @relation(fields: [scorer_person_id], references: [id])
+
+  @@unique([cycle_id, subject_employment_id, scorer_person_id])
+  @@map("sealed_score_sheets")
+  @@schema("hris")
+}
+
+model ScoreDraft {
+  id                    String @id
+  cycle_id              String
+  subject_employment_id String
+  scorer_person_id      String
+  body_json             String
+  step                  Int    @default(1)
+  updated_at            String
+  cycle                 ReviewCycle @relation(fields: [cycle_id], references: [id], onDelete: Cascade)
+  subjectEmployment     Employment  @relation(fields: [subject_employment_id], references: [id], onDelete: Cascade)
+  scorer                Person      @relation(fields: [scorer_person_id], references: [id])
+
+  @@unique([cycle_id, subject_employment_id, scorer_person_id])
+  @@map("score_drafts")
+  @@schema("hris")
+}
+
+model AdoptionBallot {
+  id                    String @id
+  cycle_id              String
+  subject_employment_id String
+  voter_person_id       String
+  decision              String
+  created_at            String
+  cycle                 ReviewCycle @relation(fields: [cycle_id], references: [id], onDelete: Cascade)
+  subjectEmployment     Employment  @relation(fields: [subject_employment_id], references: [id], onDelete: Cascade)
+  voter                 Person      @relation(fields: [voter_person_id], references: [id])
+
+  @@unique([cycle_id, subject_employment_id, voter_person_id])
+  @@map("adoption_ballots")
+  @@schema("hris")
+}
+
+model ReviewVote {
+  id                     String  @id
+  cycle_id               String
+  subject_employment_id  String
+  rating                 Int
+  missed_criterion       String?
+  dimension_notes_json   String
+  initiative_scores_json String
+  voter_ids_json         String
+  consequence            String
+  prior_rating           Int?
+  voted_at               String
+  cycle                  ReviewCycle @relation(fields: [cycle_id], references: [id], onDelete: Cascade)
+  subjectEmployment      Employment  @relation(fields: [subject_employment_id], references: [id], onDelete: Cascade)
+  memo                   ReviewMemo?
+
+  @@unique([cycle_id, subject_employment_id])
+  @@map("review_votes")
+  @@schema("hris")
+}
+
+model ReviewMemo {
+  id            String @id
+  cycle_id      String
+  employment_id String
+  vote_id       String @unique
+  body_json     String
+  delivered_at  String?
+  created_at    String
+  cycle         ReviewCycle @relation(fields: [cycle_id], references: [id], onDelete: Cascade)
+  employment    Employment  @relation(fields: [employment_id], references: [id], onDelete: Cascade)
+  vote          ReviewVote  @relation(fields: [vote_id], references: [id], onDelete: Cascade)
+
+  @@unique([cycle_id, employment_id])
+  @@map("review_memos")
+  @@schema("hris")
+}
+
+model ConsequenceNotice {
+  id            String @id
+  cycle_id      String
+  employment_id String
+  kind          String
+  body          String
+  issued_at     String
+  cycle         ReviewCycle @relation(fields: [cycle_id], references: [id], onDelete: Cascade)
+  employment    Employment  @relation(fields: [employment_id], references: [id], onDelete: Cascade)
+
+  @@map("consequence_notices")
+  @@schema("hris")
+}
+
+model PerformancePlan {
+  id                String  @id
+  cycle_id          String
+  employment_id     String
+  kind              String
+  objectives        String
+  success_metrics   String
+  support           String?
+  check_in_schedule String?
+  starts_on         String
+  ends_on           String
+  extended_once     Int     @default(0)
+  status            String
+  result            String?
+  bad_leaver_open   Int     @default(0)
+  cycle             ReviewCycle @relation(fields: [cycle_id], references: [id], onDelete: Cascade)
+  employment        Employment  @relation(fields: [employment_id], references: [id], onDelete: Cascade)
+  notes             PlanNote[]
+  ballots           PlanBallot[]
+  badLeaverBallots  BadLeaverBallot[]
+
+  @@map("performance_plans")
+  @@schema("hris")
+}
+
+model PlanNote {
+  id         String @id
+  plan_id    String
+  author_id  String
+  kind       String
+  body       String
+  late       Int    @default(0)
+  created_at String
+  plan       PerformancePlan @relation(fields: [plan_id], references: [id], onDelete: Cascade)
+  author     Person          @relation(fields: [author_id], references: [id])
+
+  @@map("plan_notes")
+  @@schema("hris")
+}
+
+model PlanBallot {
+  id         String @id
+  plan_id    String
+  voter_id   String
+  decision   String
+  created_at String
+  plan       PerformancePlan @relation(fields: [plan_id], references: [id], onDelete: Cascade)
+  voter      Person          @relation(fields: [voter_id], references: [id])
+
+  @@unique([plan_id, voter_id])
+  @@map("plan_ballots")
+  @@schema("hris")
+}
+
+model BadLeaverBallot {
+  id         String @id
+  plan_id    String
+  voter_id   String
+  decision   String
+  created_at String
+  plan       PerformancePlan @relation(fields: [plan_id], references: [id], onDelete: Cascade)
+  voter      Person          @relation(fields: [voter_id], references: [id])
+
+  @@unique([plan_id, voter_id])
+  @@map("bad_leaver_ballots")
+  @@schema("hris")
+}
+
+model VestingRecord {
+  id                        String  @id
+  equity_account_id         String
+  cycle_id                  String?
+  vesting_date              String
+  shares_vested             Int
+  vested_total              Int
+  unvested_remainder        Int
+  certificate_or_book_entry String?
+  legends                   String
+  escrow_note               String?
+  status                    String
+  hold_reason               String?
+  created_at                String
+  equityAccount             EquityAccount @relation(fields: [equity_account_id], references: [id], onDelete: Cascade)
+  cycle                     ReviewCycle?  @relation(fields: [cycle_id], references: [id])
+
+  @@unique([equity_account_id, cycle_id])
+  @@map("vesting_records")
+  @@schema("hris")
+}
+
+model CompanyAccount {
+  id          String @id
+  name        String
+  institution String
+  currency    String
+  reference   String
+  status      String
+  created_by  String
+  created_at  String
+  creator     Person @relation(fields: [created_by], references: [id])
+  cashCalls   CashCall[]
+
+  @@map("company_accounts")
+  @@schema("hris")
+}
+
+model CashCall {
+  id         String  @id
+  title      String
+  purpose    String
+  total_cents Int
+  currency   String  @default("USD")
+  due_on     String
+  status     String
+  created_by String
+  created_at String
+  account_id String?
+  creator    Person  @relation(fields: [created_by], references: [id])
+  account    CompanyAccount? @relation(fields: [account_id], references: [id])
+  lines      CashCallLine[]
+
+  @@map("cash_calls")
+  @@schema("hris")
+}
+
+model CashCallLine {
+  id           String @id
+  cash_call_id String
+  person_id    String
+  shares       Int
+  amount_cents Int
+  cashCall     CashCall @relation(fields: [cash_call_id], references: [id], onDelete: Cascade)
+  person       Person   @relation(fields: [person_id], references: [id])
+  payments     CashCallPayment[]
+
+  @@unique([cash_call_id, person_id])
+  @@map("cash_call_lines")
+  @@schema("hris")
+}
+
+model CashCallPayment {
+  id           String @id
+  line_id      String
+  amount_cents Int
+  paid_on      String
+  reference    String
+  recorded_by  String
+  created_at   String
+  line         CashCallLine @relation(fields: [line_id], references: [id], onDelete: Cascade)
+  recorder     Person       @relation(fields: [recorded_by], references: [id])
+
+  @@map("cash_call_payments")
+  @@schema("hris")
+}
+
+model Notification {
+  id         String  @id
+  person_id  String
+  kind       String
+  title      String
+  body       String
+  href       String
+  due_on     String?
+  read_at    String?
+  created_at String
+  dedupe_key String  @unique
+  person     Person  @relation(fields: [person_id], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+  @@schema("hris")
+}

@@ -1,0 +1,46 @@
+# Render Blueprint — Kritly HRIS
+# https://render.com/docs/blueprint-spec
+#
+# Companion Nai: commerce-automation-nai on the Kritly monorepo Blueprint
+# (https://commerce-automation-nai.onrender.com). After create:
+#   1. Set DATABASE_URL (Neon/other with ?schema=hris).
+#   2. Set NAI_SERVICE_URL, NAI_INTERNAL_JWT_SECRET, NAI_SERVICE_KEY to match Nai.
+#   3. On Nai, set NAI_HRIS_URL + NAI_ALLOWED_ORIGINS to this service URL.
+# See kritly/docs/RENDER_NAI_HRIS.md
+
+services:
+  - type: web
+    name: kritly-hris
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm ci && npx prisma migrate deploy && npm run seed
+    startCommand: npx tsx src/server.ts
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "20"
+      - key: HRIS_NAI_TENANT_ID
+        value: kritly
+      - key: DATABASE_URL
+        sync: false
+      - key: NAI_SERVICE_URL
+        value: https://commerce-automation-nai.onrender.com
+      - key: NAI_INTERNAL_JWT_SECRET
+        sync: false
+      - key: NAI_SERVICE_KEY
+        sync: false
+      - key: HRIS_PUBLIC_URL
+        sync: false
+      - key: WORKFORCE_API_URL
+        sync: false
+      - key: WORKFORCE_SERVICE_KEY
+        sync: false
+      - key: HRIS_INTERNAL_KEY
+        sync: false
+      - key: PLATFORM_LOGIN_URL
+        sync: false
+      - key: PUBLIC_GATEWAY_URL
+        sync: false
