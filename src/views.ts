@@ -193,11 +193,77 @@ export function avatar(name: string) {
  * Public sign-in. Matches Workday / SuccessFactors: company mark, credentials, sign in.
  * No product modules, processes, or account-provisioning details.
  */
-export function authLoginBody(opts?: { error?: string; email?: string; help?: boolean }) {
+function authShell(inner: string) {
+  return `<div class="auth-screen">
+  <aside class="auth-stage" aria-hidden="true">
+    <div class="auth-stage-mark">K</div>
+    <p class="auth-stage-word">Kritly</p>
+    <p class="auth-stage-line">Human resources</p>
+  </aside>
+  <main class="auth-panel">
+    <div class="auth-panel-card">
+      <p class="auth-kicker">Kritly</p>
+      ${inner}
+    </div>
+    <p class="auth-legal">© ${new Date().getFullYear()} Kritly</p>
+  </main>
+</div>`;
+}
+
+function authAlert(message?: string) {
+  return message ? `<div class="auth-alert" role="alert">${escapeHtml(message)}</div>` : "";
+}
+
+export function authForgotBody(opts?: { error?: string; email?: string; sent?: boolean }) {
+  if (opts?.sent) {
+    return authShell(`<h1 class="auth-signin-title">Check your email</h1>
+      <p class="auth-help">If an account exists for that address, we've sent a link to reset your password. The link expires in 1 hour.</p>
+      <p class="auth-forgot"><a href="/login">Back to sign in</a></p>`);
+  }
   const email = escapeHtml(opts?.email || "");
-  const error = opts?.error
-    ? `<div class="auth-alert" role="alert">${escapeHtml(opts.error)}</div>`
-    : "";
+  return authShell(`<h1 class="auth-signin-title">Reset password</h1>
+      ${authAlert(opts?.error)}
+      <p class="auth-help">Enter your account email and we'll send you a reset link.</p>
+      <form class="auth-form" method="post" action="/forgot-password">
+        <div class="field">
+          <label for="forgot-email">Email</label>
+          <input id="forgot-email" name="email" type="email" required value="${email}" autocomplete="username" autofocus />
+        </div>
+        <div class="auth-form-actions">
+          <button class="btn block auth-submit" type="submit">Send reset link</button>
+        </div>
+      </form>
+      <p class="auth-forgot"><a href="/login">Back to sign in</a></p>`);
+}
+
+export function authResetBody(opts: { token: string; error?: string; invalid?: boolean; minLength: number }) {
+  if (opts.invalid) {
+    return authShell(`<h1 class="auth-signin-title">Link expired</h1>
+      <p class="auth-help">This reset link is invalid, already used, or has expired.</p>
+      <p class="auth-forgot"><a href="/forgot-password">Request a new link</a></p>`);
+  }
+  return authShell(`<h1 class="auth-signin-title">Choose a new password</h1>
+      ${authAlert(opts.error)}
+      <form class="auth-form" method="post" action="/reset-password">
+        <input type="hidden" name="token" value="${escapeHtml(opts.token)}" />
+        <div class="field">
+          <label for="reset-password">New password</label>
+          <input id="reset-password" name="password" type="password" required minlength="${opts.minLength}" autocomplete="new-password" autofocus />
+        </div>
+        <div class="field">
+          <label for="reset-confirm">Confirm password</label>
+          <input id="reset-confirm" name="confirm" type="password" required minlength="${opts.minLength}" autocomplete="new-password" />
+        </div>
+        <div class="auth-form-actions">
+          <button class="btn block auth-submit" type="submit">Update password</button>
+        </div>
+      </form>`);
+}
+
+export function authLoginBody(opts?: { error?: string; email?: string; notice?: string }) {
+  const email = escapeHtml(opts?.email || "");
+  const error = authAlert(opts?.error);
+  const notice = opts?.notice ? `<p class="auth-help" role="status">${escapeHtml(opts.notice)}</p>` : "";
   return `<div class="auth-screen">
   <aside class="auth-stage" aria-hidden="true">
     <div class="auth-stage-mark">K</div>
@@ -208,6 +274,7 @@ export function authLoginBody(opts?: { error?: string; email?: string; help?: bo
     <div class="auth-panel-card">
       <p class="auth-kicker">Kritly</p>
       <h1 class="auth-signin-title">Sign in</h1>
+      ${notice}
       ${error}
       <form class="auth-form" method="post" action="/login" autocomplete="on">
         <div class="field">
@@ -222,8 +289,7 @@ export function authLoginBody(opts?: { error?: string; email?: string; help?: bo
           <button class="btn block auth-submit" type="submit">Sign in</button>
         </div>
       </form>
-      <p class="auth-forgot"><a href="/login?help=1">Forgot password?</a></p>
-      ${opts?.help ? `<p class="auth-help">Contact your administrator.</p>` : ""}
+      <p class="auth-forgot"><a href="/forgot-password">Forgot password?</a></p>
     </div>
     <p class="auth-legal">© ${new Date().getFullYear()} Kritly</p>
   </main>

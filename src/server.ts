@@ -4,8 +4,18 @@ import path from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { migrate, prisma } from "./db.js";
-import { layout, pageHeader, crumbs, statusPill, emptyState, callout, avatar, authLoginBody } from "./views.js";
-import { login, logout, requireAuth, requireApiPerm } from "./auth.js";
+import { layout, pageHeader, crumbs, statusPill, emptyState, callout, avatar, authLoginBody, authForgotBody, authResetBody } from "./views.js";
+import {
+  login,
+  logout,
+  requireAuth,
+  requireApiPerm,
+  createPasswordResetToken,
+  validatePasswordResetToken,
+  consumePasswordResetToken,
+  MIN_PASSWORD_LENGTH,
+} from "./auth.js";
+import { sendPasswordResetEmail } from "./services/emailService.js";
 import { can, personPermissionKeys, syncRolePermissions } from "./rbac.js";
 import { escapeHtml } from "./util.js";
 
@@ -145,8 +155,76 @@ function beginWorkforceSso(res: express.Response, nextPath: string) {
 }
 
 app.get("/login", route(async (req, res) => {
-  const help = String(req.query.help || "") === "1";
-  res.send(layout(null, "Sign In", authLoginBody({ help }), "/login"));
+  const notice = String(req.query.reset || "") === "1" ? "Password updated. Sign in with your new password." : undefined;
+  res.send(layout(null, "Sign In", authLoginBody({ notice }), "/login"));
+}));
+
+// ── Password reset ──────────────────────────────────────────────────────────
+// Per-email throttle so the form can't be used to spam someone's inbox.
+const RESET_REQUEST_COOLDOWN_MS = 60_000;
+const lastResetRequest = new Map<string, number>();
+
+function publicBaseUrl(req: express.Request) {
+  const configured = process.env.HRIS_PUBLIC_URL?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  return `${req.protocol}://${req.get("host")}`;
+}
+
+app.get("/forgot-password", route(async (_req, res) => {
+  res.send(layout(null, "Reset password", authForgotBody(), "/forgot-password"));
+}));
+
+app.post("/forgot-password", route(async (req, res) => {
+  const email = String(req.body.email || "").trim();
+  if (!email) {
+    res.status(400).send(layout(null, "Reset password", authForgotBody({ error: "Enter your email." }), "/forgot-password"));
+    return;
+  }
+  const key = email.toLowerCase();
+  const now = Date.now();
+  const last = lastResetRequest.get(key) ?? 0;
+  if (now - last >= RESET_REQUEST_COOLDOWN_MS) {
+    lastResetRequest.set(key, now);
+    const created = await createPasswordResetToken(email);
+    if (created) {
+      const resetUrl = `${publicBaseUrl(req)}/reset-password?token=${encodeURIComponent(created.token)}`;
+      // Don't await: response time must not reveal whether the account exists.
+      void sendPasswordResetEmail(created.person.email, created.person.full_name, resetUrl).catch((err) =>
+        console.error("[password-reset] email send failed:", err)
+      );
+    }
+  }
+  // Same response whether or not the account exists.
+  res.send(layout(null, "Check your email", authForgotBody({ sent: true }), "/forgot-password"));
+}));
+
+app.get("/reset-password", route(async (req, res) => {
+  const token = String(req.query.token || "");
+  const valid = await validatePasswordResetToken(token);
+  res.status(valid ? 200 : 400).send(
+    layout(null, "Reset password", authResetBody({ token, invalid: !valid, minLength: MIN_PASSWORD_LENGTH }), "/reset-password")
+  );
+}));
+
+app.post("/reset-password", route(async (req, res) => {
+  const token = String(req.body.token || "");
+  const password = String(req.body.password || "");
+  const confirm = String(req.body.confirm || "");
+  const fail = (error: string) =>
+    res.status(400).send(
+      layout(null, "Reset password", authResetBody({ token, error, minLength: MIN_PASSWORD_LENGTH }), "/reset-password")
+    );
+  if (password.length < MIN_PASSWORD_LENGTH) return void fail(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+  if (password !== confirm) return void fail("Passwords don't match.");
+  const ok = await consumePasswordResetToken(token, password);
+  if (!ok) {
+    res.status(400).send(
+      layout(null, "Reset password", authResetBody({ token, invalid: true, minLength: MIN_PASSWORD_LENGTH }), "/reset-password")
+    );
+    return;
+  }
+  res.clearCookie("hris_session");
+  res.redirect("/login?reset=1");
 }));
 
 app.post("/login", route(async (req, res) => {

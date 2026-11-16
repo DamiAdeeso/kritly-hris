@@ -39,6 +39,7 @@ model Person {
   planNotes                PlanNote[]
   planBallots              PlanBallot[]
   badLeaverBallots         BadLeaverBallot[]
+  passwordResetTokens      PasswordResetToken[]
 
   @@map("people")
   @@schema("hris")
@@ -558,6 +559,19 @@ model CashCallPayment {
   recorder     Person       @relation(fields: [recorded_by], references: [id])
 
   @@map("cash_call_payments")
+  @@schema("hris")
+}
+
+model PasswordResetToken {
+  id         String  @id
+  person_id  String
+  token      String  @unique
+  expires_at String
+  used_at    String?
+  created_at String
+  person     Person  @relation(fields: [person_id], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
   @@schema("hris")
 }
 

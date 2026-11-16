@@ -55,17 +55,20 @@ Post–Founder Rebalance from the Founders’ Agreement / Schedule A. Seed write
 | Ridwan | 200 | 100 | 100 | 10 |
 | **Total** | **900** | **450** | **450** | |
 
-Authorized 1,000 @ $2.00; 100 reserved pool. First service vesting date: **15 Nov 2026**.
+Authorized 1,000 @ $2.00; 100 reserved pool. First service vesting date: **21 Nov 2026**.
 
-### November 2026 cycle deadlines (staggered)
+### November 2026 cycle deadlines (week starting Monday 16 Nov)
 
-| Step | Due |
-|------|-----|
-| Evidence | 6 Nov 2026 |
-| Self-assessment | 8 Nov 2026 |
-| Seal scores | 11 Nov 2026 |
-| Votes | 13 Nov 2026 |
-| Vesting | 15 Nov 2026 |
+| Step | Due | Weekday |
+|------|-----|---------|
+| Period start | 16 Nov 2026 | Mon |
+| Evidence | 16 Nov 2026 | Mon |
+| Self-assessment | 17 Nov 2026 | Tue |
+| Mid-quarter status (midpoint) | 18 Nov 2026 | Wed |
+| Seal scores | 18 Nov 2026 | Wed |
+| Votes | 19 Nov 2026 | Thu |
+| Period end | 20 Nov 2026 | Fri |
+| Vesting | 21 Nov 2026 | Sat |
 
 ## Flow
 

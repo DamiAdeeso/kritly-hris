@@ -2,7 +2,7 @@ import { migrate, prisma } from "./db.js";
 import { DEFAULT_POLICY, assertWeights, PolicyBodySchema } from "./policy.js";
 import { syncRolePermissions } from "./rbac.js";
 import { audit } from "./audit.js";
-import { hashPassword, id, nowIso } from "./util.js";
+import { hashPassword, id, nowIso, verifyPassword } from "./util.js";
 import { assertScheduleA, scheduleAByEmail, type ScheduleARow } from "./scheduleA.js";
 import { notifyCycleOpened } from "./services/notificationService.js";
 
@@ -14,16 +14,22 @@ async function assignRole(personId: string, roleKey: string) {
   });
 }
 
-async function person(fullName: string, email: string, flags: { director?: boolean; founder?: boolean }) {
-  const existing = await prisma.person.findUnique({ where: { email }, select: { id: true } });
-  if (existing) return existing.id;
+async function person(fullName: string, email: string, flags: { director?: boolean; founder?: boolean }, defaultPassword: string) {
+  const existing = await prisma.person.findUnique({ where: { email }, select: { id: true, password_hash: true } });
+  if (existing) {
+    // If still on the shared default, migrate to personal default
+    if (verifyPassword("kritly2026", existing.password_hash)) {
+      await prisma.person.update({ where: { id: existing.id }, data: { password_hash: hashPassword(defaultPassword) } });
+    }
+    return existing.id;
+  }
   const pid = id("p");
   await prisma.person.create({
     data: {
       id: pid,
       full_name: fullName,
       email,
-      password_hash: hashPassword("kritly2026"),
+      password_hash: hashPassword(defaultPassword),
       is_director: flags.director ? 1 : 0,
       is_founder: flags.founder ? 1 : 0,
       created_at: nowIso(),
@@ -118,16 +124,28 @@ async function main() {
   assertWeights(DEFAULT_POLICY);
   const policyBody = PolicyBodySchema.parse(DEFAULT_POLICY);
 
-  const dami = await person("Oluwadamilola Caleb Adeeso", "dami@kritly.com", { director: true, founder: true });
-  const salam = await person("Abdul Salam Olamide Ajetunmobi", "salam@kritly.com", { director: true, founder: true });
-  const fikunmi = await person("Oluwafikunmi Adegbenga Eshilokun", "fikunmi@kritly.com", { director: true, founder: true });
-  const ridwan = await person("Ridwan Adekunle Meshinoye", "ridwan@kritly.com", { director: true, founder: true });
-  const adegbe = await person("Adegbemisola Similoluwa Adeeso", "adegbemisola@kritly.com", { director: true, founder: false });
+  // Migrate old @kritly.com emails to real personal emails if they still exist in DB.
+  const emailMigrations: Array<[string, string]> = [
+    ["dami@kritly.com", "damilolaadeeso@gmail.com"],
+    ["salam@kritly.com", "slammie236@gmail.com"],
+    ["fikunmi@kritly.com", "oluwafikunmieshilokun@gmail.com"],
+    ["ridwan@kritly.com", "rilexmeshy@gmail.com"],
+    ["adegbemisola@kritly.com", "adeesoadegbemisola@gmail.com"],
+  ];
+  for (const [oldEmail, newEmail] of emailMigrations) {
+    const existing = await prisma.person.findUnique({ where: { email: oldEmail }, select: { id: true } });
+    if (existing) {
+      await prisma.person.update({ where: { id: existing.id }, data: { email: newEmail } });
+    }
+  }
+
+  const dami    = await person("Oluwadamilola Caleb Adeeso",        "damilolaadeeso@gmail.com",        { director: true,  founder: true  }, "Dami@2026");
+  const salam   = await person("Abdul Salam Olamide Ajetunmobi",    "slammie236@gmail.com",            { director: true,  founder: true  }, "Salam@2026");
+  const fikunmi = await person("Oluwafikunmi Adegbenga Eshilokun",  "oluwafikunmieshilokun@gmail.com", { director: true,  founder: true  }, "Fikunmi@2026");
+  const ridwan  = await person("Ridwan Adekunle Meshinoye",         "rilexmeshy@gmail.com",            { director: true,  founder: true  }, "Ridwan@2026");
+  const adegbe  = await person("Adegbemisola Similoluwa Adeeso",    "adeesoadegbemisola@gmail.com",    { director: true,  founder: false }, "Adegbe@2026");
   // Auditor-only for the Nai room walk: audit.read without cycle.manage.
-  const auditor = await person("Kritly Auditor", "auditor@kritly.com", {
-    director: false,
-    founder: false,
-  });
+  const auditor = await person("Kritly Auditor", "auditor@kritly.com", { director: false, founder: false }, "Auditor@2026");
 
   for (const pid of [dami, salam, fikunmi, ridwan]) {
     await assignRole(pid, "director");
@@ -145,10 +163,10 @@ async function main() {
   const empRid = await employment(ridwan, "Chief Technology Officer", "Operator", true);
   await employment(adegbe, "Director", "Other", false);
 
-  const saDami = scheduleAByEmail("dami@kritly.com")!;
-  const saSalam = scheduleAByEmail("salam@kritly.com")!;
-  const saFik = scheduleAByEmail("fikunmi@kritly.com")!;
-  const saRid = scheduleAByEmail("ridwan@kritly.com")!;
+  const saDami = scheduleAByEmail("damilolaadeeso@gmail.com")!;
+  const saSalam = scheduleAByEmail("slammie236@gmail.com")!;
+  const saFik = scheduleAByEmail("oluwafikunmieshilokun@gmail.com")!;
+  const saRid = scheduleAByEmail("rilexmeshy@gmail.com")!;
   await equity(empDami, policyBody.equity_legends, saDami);
   await equity(empSalam, policyBody.equity_legends, saSalam);
   await equity(empFik, policyBody.equity_legends, saFik);
@@ -184,13 +202,16 @@ async function main() {
     });
   }
 
+  // Week starting Monday 16 Nov 2026 through Saturday vest.
+  // starts_on → ends_on midpoint is mid-quarter due (Wed 18).
   const NOV_DEADLINES = {
-    evidence: "2026-11-06",
-    selfAssessment: "2026-11-08",
-    scores: "2026-11-11",
-    votes: "2026-11-13",
-    vesting: "2026-11-15",
-    periodEnd: "2026-11-14",
+    periodStart: "2026-11-16",
+    evidence: "2026-11-16",
+    selfAssessment: "2026-11-17",
+    scores: "2026-11-18",
+    votes: "2026-11-19",
+    periodEnd: "2026-11-20",
+    vesting: "2026-11-21",
   } as const;
 
   const existingCycle = await prisma.reviewCycle.findFirst({
@@ -206,8 +227,8 @@ async function main() {
       data: {
         id: cycleId,
         name: "November 2026 Vesting Review",
-        period_label: "Pre-vesting review before 15 Nov 2026",
-        starts_on: "2026-08-15",
+        period_label: "Pre-vesting review before 21 Nov 2026",
+        starts_on: NOV_DEADLINES.periodStart,
         ends_on: NOV_DEADLINES.periodEnd,
         review_deadline: NOV_DEADLINES.votes,
         vesting_date: NOV_DEADLINES.vesting,
@@ -261,7 +282,7 @@ async function main() {
           title: item.title,
           company_objective: item.objective,
           success_criteria: `Demonstrate completion of: ${item.title}`,
-          start_date: "2026-08-15",
+          start_date: NOV_DEADLINES.periodStart,
           due_date: NOV_DEADLINES.evidence,
           status: "in_progress",
           weight: 1,
@@ -275,6 +296,8 @@ async function main() {
   await prisma.reviewCycle.update({
     where: { id: cycleId },
     data: {
+      period_label: "Pre-vesting review before 21 Nov 2026",
+      starts_on: NOV_DEADLINES.periodStart,
       ends_on: NOV_DEADLINES.periodEnd,
       review_deadline: NOV_DEADLINES.votes,
       vesting_date: NOV_DEADLINES.vesting,
@@ -286,7 +309,10 @@ async function main() {
   });
   await prisma.initiative.updateMany({
     where: { cycle_id: cycleId },
-    data: { due_date: NOV_DEADLINES.evidence },
+    data: {
+      start_date: NOV_DEADLINES.periodStart,
+      due_date: NOV_DEADLINES.evidence,
+    },
   });
 
   await notifyCycleOpened(cycleId);
@@ -299,12 +325,12 @@ async function main() {
     `Deadlines: evidence ${NOV_DEADLINES.evidence} → self ${NOV_DEADLINES.selfAssessment} → scores ${NOV_DEADLINES.scores} → votes ${NOV_DEADLINES.votes} → vest ${NOV_DEADLINES.vesting}`
   );
   console.log(
-    "Login emails: dami@kritly.com, salam@kritly.com, fikunmi@kritly.com, ridwan@kritly.com, adegbemisola@kritly.com, auditor@kritly.com"
+    "Login emails: damilolaadeeso@gmail.com, slammie236@gmail.com, oluwafikunmieshilokun@gmail.com, rilexmeshy@gmail.com, adeesoadegbemisola@gmail.com, auditor@kritly.com"
   );
-  console.log("Password for all: kritly2026");
+  console.log("Passwords: Dami → Dami@2026 · Salam → Salam@2026 · Fikunmi → Fikunmi@2026 · Ridwan → Ridwan@2026 · Adegbe → Adegbe@2026 · Auditor → Auditor@2026");;
   console.log("Schedule A locked (post-rebalance): Dami 280, Salam 220, Fikunmi 200, Ridwan 200 — past vested / service unvested 50/50.");
   console.log("Note: Adegbemisola is seeded as Dami affiliate for recusal; clear in UI/DB if incorrect.");
-  console.log("Nai room: founder dami@; director recusal adegbemisola@ on Dami's vote page; auditor auditor@.");
+  console.log("Nai room: founder damilolaadeeso@gmail.com; director recusal adeesoadegbemisola@gmail.com on Dami's vote page; auditor auditor@kritly.com.");
 }
 
 main().catch((err) => {
