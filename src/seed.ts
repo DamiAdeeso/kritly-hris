@@ -204,6 +204,43 @@ async function main() {
 
   // Week starting Monday 16 Nov 2026 through Saturday vest.
   // starts_on → ends_on midpoint is mid-quarter due (Wed 18).
+  // Success criteria per task title: what "done" means, stated only from the task itself.
+  // Tasks shared by several founders (reviews, UX audit) use the same wording.
+  const GENERIC_CRITERIA = (title: string) => `Demonstrate completion of: ${title}`;
+  const CRITERIA: Record<string, string> = {
+    // Dami
+    "Company restructure documents": "Company restructure documents completed and shared with the founders.",
+    "Merger negotiations and finalization": "Merger negotiations concluded and the merger finalized.",
+    "Bank account": "Company bank account opened and active.",
+    "Eval bench": "Eval bench built and usable.",
+    "Chat page improvement": "Chat page improvements shipped.",
+    "Training founders on the existing system": "All founders trained on the existing system.",
+    "HRIS development": "HRIS deployed and in use by the founders.",
+    "Nai v1 development": "Nai v1 deployed and usable.",
+    // Fikunmi
+    "UI improvements on the current application": "UI improvements shipped on the current application.",
+    "Paystack account setup": "Paystack account set up and active.",
+    "WooCommerce store setup": "WooCommerce store set up.",
+    "Finance bill collation": "Finance bills collated and shared with the founders.",
+    // Ridwan
+    "Flutterwave setup": "Flutterwave set up and active.",
+    "UX audit": "UX audit completed and findings shared with the founders.",
+    "Shopify setup": "Shopify set up.",
+    // Salam
+    "Stripe setup": "Stripe set up and active.",
+    "Meta account setup": "Meta account set up and active.",
+    "EIN application": "EIN application submitted and EIN received.",
+    "Kritly Nigeria Limited registration": "Kritly Nigeria Limited registered.",
+    "Notion workspace updates and necessary documentation":
+      "Notion workspace kept up to date in place of meeting minutes, with the necessary documentation added.",
+    "Phone number acquisition": "Company phone number acquired.",
+    // Shared
+    "Review merger documents": "Merger documents reviewed and feedback shared with the founders.",
+    "Review company restructure": "Company restructure reviewed and feedback shared with the founders.",
+    "Participation in the UX audit": "Took part in the UX audit and shared input.",
+  };
+  const criteriaFor = (title: string) => CRITERIA[title] ?? GENERIC_CRITERIA(title);
+
   const NOV_DEADLINES = {
     periodStart: "2026-11-16",
     evidence: "2026-11-16",
@@ -280,7 +317,7 @@ async function main() {
           employment_id: item.emp,
           title: item.title,
           company_objective: item.objective,
-          success_criteria: `Demonstrate completion of: ${item.title}`,
+          success_criteria: criteriaFor(item.title),
           start_date: NOV_DEADLINES.periodStart,
           due_date: NOV_DEADLINES.evidence,
           status: "in_progress",
@@ -318,7 +355,6 @@ async function main() {
       formerly: ["Meeting notes", "Run the Notion workspace: weekly updates and company documentation"],
     },
   ];
-  const criteriaFor = (title: string) => `Demonstrate completion of: ${title}`;
   const TASK_REMOVALS: { emp: string; title: string }[] = [{ emp: empDami, title: "Improve" }];
 
   for (const s of TASK_SPECS) {
@@ -398,6 +434,26 @@ async function main() {
       entityId: row.id,
       before: { title: row.title },
       reason: "Seeded task update",
+    });
+  }
+
+  // Replace the placeholder criteria with the real ones. Criteria edited in the app are kept.
+  const cycleTasks = await prisma.initiative.findMany({
+    where: { cycle_id: cycleId },
+    select: { id: true, title: true, success_criteria: true },
+  });
+  for (const t of cycleTasks) {
+    const next = CRITERIA[t.title];
+    if (!next || t.success_criteria !== GENERIC_CRITERIA(t.title)) continue;
+    await prisma.initiative.update({ where: { id: t.id }, data: { success_criteria: next } });
+    await audit({
+      actorId: dami,
+      action: "initiative.update",
+      entityType: "initiative",
+      entityId: t.id,
+      before: { criteria: t.success_criteria },
+      after: { criteria: next },
+      reason: "Seeded success criteria",
     });
   }
 
