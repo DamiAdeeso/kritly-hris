@@ -75,6 +75,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 }
 
 const RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
+export const WELCOME_TTL_HOURS = 24;
 export const MIN_PASSWORD_LENGTH = 8;
 
 /** Only a SHA-256 of the token is stored, so a DB read can't be replayed as a reset link. */
@@ -83,7 +84,8 @@ function hashResetToken(token: string) {
 }
 
 export async function createPasswordResetToken(
-  email: string
+  email: string,
+  ttlMs: number = RESET_TTL_MS
 ): Promise<{ token: string; person: { full_name: string; email: string } } | null> {
   const row = await prisma.person.findUnique({
     where: { email: email.trim() },
@@ -98,7 +100,7 @@ export async function createPasswordResetToken(
       id: id("prt"),
       person_id: row.id,
       token: hashResetToken(token),
-      expires_at: new Date(Date.now() + RESET_TTL_MS).toISOString(),
+      expires_at: new Date(Date.now() + ttlMs).toISOString(),
       created_at: nowIso(),
     },
   });

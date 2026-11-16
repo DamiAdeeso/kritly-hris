@@ -239,10 +239,10 @@ export function authForgotBody(opts?: { error?: string; email?: string; sent?: b
 export function authResetBody(opts: { token: string; error?: string; invalid?: boolean; minLength: number }) {
   if (opts.invalid) {
     return authShell(`<h1 class="auth-signin-title">Link expired</h1>
-      <p class="auth-help">This reset link is invalid, already used, or has expired.</p>
+      <p class="auth-help">This link is invalid, already used, or has expired.</p>
       <p class="auth-forgot"><a href="/forgot-password">Request a new link</a></p>`);
   }
-  return authShell(`<h1 class="auth-signin-title">Choose a new password</h1>
+  return authShell(`<h1 class="auth-signin-title">Set your password</h1>
       ${authAlert(opts.error)}
       <form class="auth-form" method="post" action="/reset-password">
         <input type="hidden" name="token" value="${escapeHtml(opts.token)}" />
