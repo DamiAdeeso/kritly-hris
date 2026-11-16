@@ -41,6 +41,7 @@ import {
   getPlan,
 } from "../services/escalationService.js";
 import { singleFileUpload } from "../multipart.js";
+import { isInitiativeStatus } from "../initiativeStatus.js";
 
 type RouteFn = (req: express.Request, res: express.Response) => void | Promise<void>;
 type PageFn = (req: express.Request, title: string, body: string) => Promise<string>;
@@ -642,7 +643,11 @@ export function registerQuarterExtras(
         res.status(403).send("Forbidden");
         return;
       }
-      const status = String(req.body.status || "on_track");
+      const status = String(req.body.status || "");
+      if (!isInitiativeStatus(status)) {
+        res.status(400).send(await page(req, "Error", `<p class="err">Choose a status: Not started, In progress, Blocked or Done.</p>`));
+        return;
+      }
       const evidenceRef = String(req.body.evidence_ref || "").trim();
       await prisma.initiative.update({
         where: { id: req.params.initiativeId },

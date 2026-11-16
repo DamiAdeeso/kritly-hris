@@ -203,7 +203,7 @@ async function main() {
   }
 
   // Week starting Monday 16 Nov 2026 through Saturday vest.
-  // starts_on → ends_on midpoint is mid-quarter due (Wed 18).
+  // starts_on â†’ ends_on midpoint is mid-quarter due (Wed 18).
   // Success criteria per task title: what "done" means, stated only from the task itself.
   // Tasks shared by several founders (reviews, UX audit) use the same wording.
   const GENERIC_CRITERIA = (title: string) => `Demonstrate completion of: ${title}`;
@@ -320,7 +320,7 @@ async function main() {
           success_criteria: criteriaFor(item.title),
           start_date: NOV_DEADLINES.periodStart,
           due_date: NOV_DEADLINES.evidence,
-          status: "in_progress",
+          status: "not_started",
           weight: 1,
           evidence_ref: null,
         },
@@ -399,7 +399,7 @@ async function main() {
         success_criteria: spec.criteria,
         start_date: NOV_DEADLINES.periodStart,
         due_date: NOV_DEADLINES.evidence,
-        status: "in_progress",
+        status: "not_started",
         weight: 1,
         evidence_ref: null,
       },
@@ -486,13 +486,13 @@ async function main() {
 
   console.log("Seed complete.");
   console.log(
-    `Deadlines: evidence ${NOV_DEADLINES.evidence} → self ${NOV_DEADLINES.selfAssessment} → scores ${NOV_DEADLINES.scores} → votes ${NOV_DEADLINES.votes} → vest ${NOV_DEADLINES.vesting}`
+    `Deadlines: evidence ${NOV_DEADLINES.evidence} â†’ self ${NOV_DEADLINES.selfAssessment} â†’ scores ${NOV_DEADLINES.scores} â†’ votes ${NOV_DEADLINES.votes} â†’ vest ${NOV_DEADLINES.vesting}`
   );
   console.log(
     "Login emails: damilolaadeeso@gmail.com, slammie236@gmail.com, oluwafikunmieshilokun@gmail.com, rilexmeshy@gmail.com, adeesoadegbemisola@gmail.com, auditor@kritly.com"
   );
-  console.log("Passwords: Dami → Dami@2026 · Salam → Salam@2026 · Fikunmi → Fikunmi@2026 · Ridwan → Ridwan@2026 · Adegbe → Adegbe@2026 · Auditor → Auditor@2026");;
-  console.log("Schedule A locked (post-rebalance): Dami 280, Salam 220, Fikunmi 200, Ridwan 200 — past vested / service unvested 50/50.");
+  console.log("Passwords: Dami â†’ Dami@2026 Â· Salam â†’ Salam@2026 Â· Fikunmi â†’ Fikunmi@2026 Â· Ridwan â†’ Ridwan@2026 Â· Adegbe â†’ Adegbe@2026 Â· Auditor â†’ Auditor@2026");;
+  console.log("Schedule A locked (post-rebalance): Dami 280, Salam 220, Fikunmi 200, Ridwan 200 â€” past vested / service unvested 50/50.");
   console.log("Note: Adegbemisola is seeded as Dami affiliate for recusal; clear in UI/DB if incorrect.");
   console.log("Nai room: founder damilolaadeeso@gmail.com; director recusal adeesoadegbemisola@gmail.com on Dami's vote page; auditor auditor@kritly.com.");
 }

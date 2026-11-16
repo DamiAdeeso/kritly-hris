@@ -18,6 +18,17 @@ import {
 import { sendPasswordResetEmail } from "./services/emailService.js";
 import { can, personPermissionKeys, syncRolePermissions } from "./rbac.js";
 import { escapeHtml } from "./util.js";
+import {
+  INITIATIVE_STATUSES,
+  INITIATIVE_STATUS_LABEL,
+  INITIATIVE_STATUS_TONE,
+  normalizeInitiativeStatus,
+  type InitiativeStatus,
+} from "./initiativeStatus.js";
+
+function initiativeStatusPill(status: InitiativeStatus) {
+  return statusPill(INITIATIVE_STATUS_LABEL[status], INITIATIVE_STATUS_TONE[status]);
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -864,10 +875,10 @@ app.get("/performance/:cycleId/self", route(async (req, res) => {
       ${initiatives
         .map((i) => {
           const files = filesByIni.get(String(i.id)) || [];
-          const status = String(i.status ?? "on_track");
+          const status = normalizeInitiativeStatus(i.status);
           return `<div class="card">
             <form method="post" action="/performance/${cycle.id}/initiative/${i.id}/status" enctype="multipart/form-data">
-              <div class="card-head"><h2>${escapeHtml(String(i.title))}</h2>${statusPill(status, "neutral")}</div>
+              <div class="card-head"><h2>${escapeHtml(String(i.title))}</h2>${initiativeStatusPill(status)}</div>
               <p class="hint" style="margin-bottom:0.75rem">${escapeHtml(String(i.success_criteria))}</p>
               ${
                 files.length
@@ -882,10 +893,9 @@ app.get("/performance/:cycleId/self", route(async (req, res) => {
               <div class="field-grid">
                 <div class="field"><label>Status</label>
                   <select name="status">
-                    <option value="on_track" ${status === "on_track" ? "selected" : ""}>On track</option>
-                    <option value="at_risk" ${status === "at_risk" ? "selected" : ""}>At risk</option>
-                    <option value="off_track" ${status === "off_track" ? "selected" : ""}>Off track</option>
-                    <option value="in_progress" ${status === "in_progress" ? "selected" : ""}>In progress</option>
+                    ${INITIATIVE_STATUSES.map(
+                      (s) => `<option value="${s}" ${status === s ? "selected" : ""}>${INITIATIVE_STATUS_LABEL[s]}</option>`
+                    ).join("")}
                   </select>
                 </div>
                 <div class="field"><label>Evidence link or path</label><input name="evidence_ref" value="${escapeHtml(String(i.evidence_ref ?? ""))}" placeholder="repo path, doc, or URL" /></div>
@@ -1078,6 +1088,7 @@ app.get("/performance/:cycleId/subject/:employmentId", route(async (req, res) =>
             <dl class="kv">
               <dt>Objective</dt><dd>${escapeHtml(String(i.company_objective))}</dd>
               <dt>Success criteria</dt><dd>${escapeHtml(String(i.success_criteria))}</dd>
+              <dt>Reported status</dt><dd>${initiativeStatusPill(normalizeInitiativeStatus(i.status))}</dd>
               <dt>Evidence (from reviewee)</dt><dd>${evidenceLinkHtml(i.evidence_ref as string | undefined)}</dd>
             </dl>
             ${
@@ -1086,7 +1097,7 @@ app.get("/performance/:cycleId/subject/:employmentId", route(async (req, res) =>
                   <ul class="muted">${updates
                     .map(
                       (u) =>
-                        `<li><strong>${escapeHtml(u.status)}</strong> · ${escapeHtml(u.note)} <span class="muted">(${escapeHtml(u.created_at.slice(0, 10))})</span></li>`
+                        `<li>${initiativeStatusPill(normalizeInitiativeStatus(u.status))} ${escapeHtml(u.note)} <span class="muted">(${escapeHtml(u.created_at.slice(0, 10))})</span></li>`
                     )
                     .join("")}</ul>`
                 : `<p class="hint">No status updates yet.</p>`
@@ -1158,6 +1169,7 @@ app.get("/performance/:cycleId/subject/:employmentId/seal", route(async (req, re
               <div class="card-head"><h2>${escapeHtml(i.title)}</h2></div>
               <dl class="kv">
                 <dt>Success criteria</dt><dd>${escapeHtml(i.success_criteria)}</dd>
+                <dt>Reported status</dt><dd>${initiativeStatusPill(normalizeInitiativeStatus(i.status))}</dd>
                 <dt>Evidence</dt><dd>${evidenceLinkHtml(i.evidence_ref)}</dd>
                 <dt>Files</dt><dd>${
                   files.length
