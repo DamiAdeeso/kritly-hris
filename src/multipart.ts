@@ -61,10 +61,8 @@ export function singleFileUpload(fieldName: string, maxBytes: number) {
           const headerEnd = part.indexOf("\r\n\r\n");
           if (headerEnd < 0) continue;
           const headerText = part.subarray(0, headerEnd).toString("utf8");
-          let content = part.subarray(headerEnd + 4);
-          if (content.length >= 2 && content.subarray(content.length - 2).toString() === "\r\n") {
-            content = content.subarray(0, content.length - 2);
-          }
+          // splitMultipart already drops the CRLF that precedes each boundary.
+          const content = part.subarray(headerEnd + 4);
           const disp = /content-disposition:\s*(.+)/i.exec(headerText)?.[1] || "";
           const { name, filename } = parseDisposition(disp);
           if (!name) continue;

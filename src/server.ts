@@ -1078,7 +1078,7 @@ function dimRadios(name: string, selected?: number) {
 }
 
 app.get("/performance/:cycleId/subject/:employmentId", route(async (req, res) => {
-  const { cycle, policy, subject, initiatives, selfRow, selfBody, updatesByIni } = await loadSubjectContext(
+  const { cycle, policy, subject, initiatives, selfRow, selfBody, updatesByIni, filesByIni } = await loadSubjectContext(
     req.params.cycleId,
     req.params.employmentId
   );
@@ -1088,7 +1088,9 @@ app.get("/performance/:cycleId/subject/:employmentId", route(async (req, res) =>
     (await disinterestedDirectors(subject.person_id, policy)).some((d) => d.id === req.person!.id);
   const alreadySealed = canSeal && (await hasSealedSheet(cycle.id, subject.id, req.person!.id));
   const draft = canSeal ? await getScoreDraft(cycle.id, subject.id, req.person!.id) : undefined;
-  const missingEvidence = initiatives.filter((i) => !String(i.evidence_ref || "").trim());
+  const missingEvidence = initiatives.filter(
+    (i) => !String(i.evidence_ref || "").trim() && !(filesByIni.get(i.id) || []).length
+  );
   res.send(
     await page(
       req,
@@ -1130,6 +1132,13 @@ app.get("/performance/:cycleId/subject/:employmentId", route(async (req, res) =>
               <dt>Success criteria</dt><dd>${escapeHtml(String(i.success_criteria))}</dd>
               <dt>Reported status</dt><dd>${initiativeStatusPill(normalizeInitiativeStatus(i.status))}</dd>
               <dt>Evidence (from reviewee)</dt><dd>${evidenceLinkHtml(i.evidence_ref as string | undefined)}</dd>
+              ${
+                (filesByIni.get(i.id) || []).length
+                  ? `<dt>Files</dt><dd>${(filesByIni.get(i.id) || [])
+                      .map((f) => `<a href="/evidence/${f.id}" target="_blank" rel="noopener">${escapeHtml(f.original_name)}</a>`)
+                      .join(" · ")}</dd>`
+                  : ""
+              }
             </dl>
             ${
               updates.length
