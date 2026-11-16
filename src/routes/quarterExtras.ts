@@ -677,7 +677,9 @@ export function registerQuarterExtras(
           buffer: file.buffer,
         });
       }
-      res.redirect(`/performance/${req.params.cycleId}/self`);
+      res.redirect(
+        `/performance/${req.params.cycleId}/self?saved=${encodeURIComponent(req.params.initiativeId)}#ini-${encodeURIComponent(req.params.initiativeId)}`
+      );
     })
   );
 }

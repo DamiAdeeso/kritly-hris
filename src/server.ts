@@ -17,7 +17,7 @@ import {
 } from "./auth.js";
 import { sendPasswordResetEmail } from "./services/emailService.js";
 import { can, personPermissionKeys, syncRolePermissions } from "./rbac.js";
-import { escapeHtml } from "./util.js";
+import { escapeHtml, formatDay } from "./util.js";
 import {
   INITIATIVE_STATUSES,
   INITIATIVE_STATUS_LABEL,
@@ -294,12 +294,31 @@ app.use((req, _res, next) => {
 
 app.get("/", route(async (req, res) => {
   const cycles = await listCycles();
-  const peopleCount = await prisma.person.count();
   const openCycle = cycles.find((c) => c.status !== "vesting_closed") ?? cycles[0];
-  const confirmed = await prisma.equityAccount.count({ where: { schedule_a_confirmed: 1 } });
   const tasks = await syncTaskNotifications(req.person!.id);
   const openTasks = tasks.filter((t) => !t.done);
   const primary = openTasks[0];
+  // One row for all mid-quarter notes instead of one per task.
+  const midTasks = tasks.filter((t) => t.kind === "mid_quarter");
+  const midOpen = midTasks.filter((t) => !t.done);
+  const taskRows: Array<{ title: string; body: string; href: string; dueOn: string; overdue: boolean }> = [];
+  let midAdded = false;
+  for (const t of openTasks) {
+    if (t.kind !== "mid_quarter") {
+      taskRows.push(t);
+      continue;
+    }
+    if (midAdded) continue;
+    midAdded = true;
+    taskRows.push({
+      title: "Post mid-quarter status notes",
+      body: `${midTasks.length - midOpen.length} of ${midTasks.length} tasks have a status note. Add a one-line note on each.`,
+      href: t.href,
+      dueOn: t.dueOn,
+      overdue: midOpen.some((m) => m.overdue),
+    });
+  }
+  const nextDue = taskRows.map((t) => t.dueOn).filter(Boolean).sort()[0];
   const deadlines = openCycle ? await cycleDeadlines(openCycle) : null;
   const showFinance = await can(req.person!.id, "finance.read");
   const openFinance = showFinance ? await outstandingByCurrency(req.person!.id) : [];
@@ -329,22 +348,20 @@ app.get("/", route(async (req, res) => {
       ${
         primary && (primary.kind === "evidence" || primary.kind === "self_assessment")
           ? callout(
-              `Action required: go to My evidence, attach links for each initiative, and submit your self-assessment. Due ${primary.dueOn}${
+              `Action required: go to My evidence, attach links for each initiative, and submit your self-assessment. Due ${formatDay(primary.dueOn)}${
                 primary.overdue ? " (overdue)" : ""
               }.`
             )
           : ""
       }
       <div class="row">
-        <div class="stat"><div class="label">Open tasks</div><strong>${openTasks.length}</strong></div>
-        <div class="stat"><div class="label">Unread</div><strong>${await unreadCount(req.person!.id)}</strong></div>
-        <div class="stat"><div class="label">People</div><strong>${peopleCount}</strong></div>
-        <div class="stat"><div class="label">Schedule A</div><strong>${confirmed}</strong></div>
+        <div class="stat"><div class="label">Open tasks</div><strong>${taskRows.length}</strong></div>
+        <div class="stat"><div class="label">Next due</div><strong>${escapeHtml(nextDue ? formatDay(nextDue) : "—")}</strong></div>
       </div>
       <div class="section-label">Your tasks</div>
       ${
-        openTasks.length
-          ? `<div class="list">${openTasks
+        taskRows.length
+          ? `<div class="list">${taskRows
               .map(
                 (t) => `<a class="list-row" href="${t.href}" style="color:inherit;text-decoration:none">
                   <div>
@@ -353,7 +370,7 @@ app.get("/", route(async (req, res) => {
                   </div>
                   <div class="aside">
                     ${t.overdue ? statusPill("Overdue", "bad") : statusPill("Due", "warn")}
-                    <span class="task-due${t.overdue ? " overdue" : ""}">${escapeHtml(t.dueOn)}</span>
+                    <span class="task-due${t.overdue ? " overdue" : ""}">${escapeHtml(formatDay(t.dueOn))}</span>
                   </div>
                 </a>`
               )
@@ -364,18 +381,18 @@ app.get("/", route(async (req, res) => {
         deadlines && openCycle
           ? `<div class="section-label">Cycle deadlines · ${escapeHtml(openCycle.name)}</div>
             <div class="row">
-              <div class="stat"><div class="label">Evidence due</div><strong>${escapeHtml(deadlines.evidenceDueOn)}</strong></div>
-              <div class="stat"><div class="label">Self-assessment due</div><strong>${escapeHtml(deadlines.selfAssessmentDueOn)}</strong></div>
-              <div class="stat"><div class="label">Scores due</div><strong>${escapeHtml(deadlines.scoresDueOn)}</strong></div>
-              <div class="stat"><div class="label">Votes due</div><strong>${escapeHtml(deadlines.votesDueOn)}</strong></div>
-              <div class="stat"><div class="label">Vesting date</div><strong>${escapeHtml(deadlines.vestingDate)}</strong></div>
+              <div class="stat"><div class="label">Evidence due</div><strong>${escapeHtml(formatDay(deadlines.evidenceDueOn))}</strong></div>
+              <div class="stat"><div class="label">Self-assessment due</div><strong>${escapeHtml(formatDay(deadlines.selfAssessmentDueOn))}</strong></div>
+              <div class="stat"><div class="label">Scores due</div><strong>${escapeHtml(formatDay(deadlines.scoresDueOn))}</strong></div>
+              <div class="stat"><div class="label">Votes due</div><strong>${escapeHtml(formatDay(deadlines.votesDueOn))}</strong></div>
+              <div class="stat"><div class="label">Vesting date</div><strong>${escapeHtml(formatDay(deadlines.vestingDate))}</strong></div>
             </div>`
           : ""
       }
       <div class="section-label">Also</div>
       <div class="list">
         <div class="list-row">
-          <div><div class="title">Equity ledger</div><div class="meta">Schedule A locked · ${SCHEDULE_A_FOUNDER_OUTSTANDING} founder shares · first service vest ${SCHEDULE_A_FIRST_VESTING_DATE}</div></div>
+          <div><div class="title">Equity ledger</div><div class="meta">Schedule A locked · ${SCHEDULE_A_FOUNDER_OUTSTANDING} founder shares · first service vest ${escapeHtml(formatDay(SCHEDULE_A_FIRST_VESTING_DATE))}</div></div>
           <div class="aside"><a class="btn secondary" href="/equity">Open Equity</a></div>
         </div>
         ${
@@ -547,7 +564,7 @@ app.get("/people/:id", route(async (req, res) => {
                 <dt>Title</dt><dd>${escapeHtml(String(emp.title))}</dd>
                 <dt>Category</dt><dd>${escapeHtml(String(emp.category))}</dd>
                 <dt>Qualifying Service</dt><dd>${emp.qualifying_service ? "Yes" : "No"}</dd>
-                <dt>Start</dt><dd>${escapeHtml(String(emp.start_date))}</dd>
+                <dt>Start</dt><dd>${escapeHtml(formatDay(String(emp.start_date)))}</dd>
               </dl>`
               : emptyState("No employment record.")
         }
@@ -868,21 +885,43 @@ app.get("/performance/:cycleId/self", route(async (req, res) => {
       ])}
       ${pageHeader(
         "My evidence",
-        `This is your path. Upload evidence for each initiative, then submit a self-assessment. Evidence due ${selfDeadlines.evidenceDueOn}; self-assessment due ${selfDeadlines.selfAssessmentDueOn}.`,
+        `Add evidence for each task, then submit your self-assessment. Evidence due ${formatDay(selfDeadlines.evidenceDueOn)} · self-assessment due ${formatDay(selfDeadlines.selfAssessmentDueOn)}.`,
         `<a class="btn secondary" href="/performance/${cycle.id}">Back to cycle</a>`
       )}
-      ${callout("Directors cannot invent evidence for you. They score only what you post here. A link or a file counts.")}
+      ${callout("Directors score only what you post here. A link or a file counts as evidence.")}
+      ${(() => {
+        const withEvidence = initiatives.filter(
+          (i) => String(i.evidence_ref ?? "").trim() || (filesByIni.get(String(i.id)) || []).length
+        ).length;
+        const pct = initiatives.length ? Math.round((withEvidence / initiatives.length) * 100) : 0;
+        return `<div class="progress-line">
+          <strong>${withEvidence} of ${initiatives.length} tasks have evidence</strong>
+          <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${initiatives.length}" aria-valuenow="${withEvidence}"><span style="width:${pct}%"></span></div>
+        </div>`;
+      })()}
       ${initiatives
         .map((i) => {
           const files = filesByIni.get(String(i.id)) || [];
           const status = normalizeInitiativeStatus(i.status);
-          return `<div class="card">
+          const hasEvidence = Boolean(String(i.evidence_ref ?? "").trim() || files.length);
+          const justSaved = String(req.query.saved || "") === String(i.id);
+          return `<details class="card task-card" id="ini-${escapeHtml(String(i.id))}"${justSaved ? " open" : ""}>
+            <summary>
+              <div class="task-summary">
+                <h2>${escapeHtml(String(i.title))}</h2>
+                <p class="hint">${escapeHtml(String(i.success_criteria))}</p>
+                <div class="task-pills">
+                  ${initiativeStatusPill(status)}
+                  ${hasEvidence ? statusPill("Evidence added", "ok") : statusPill("No evidence yet", "neutral")}
+                  ${justSaved ? statusPill("Saved", "ok") : ""}
+                </div>
+              </div>
+            </summary>
+            <div class="task-body">
             <form method="post" action="/performance/${cycle.id}/initiative/${i.id}/status" enctype="multipart/form-data">
-              <div class="card-head"><h2>${escapeHtml(String(i.title))}</h2>${initiativeStatusPill(status)}</div>
-              <p class="hint" style="margin-bottom:0.75rem">${escapeHtml(String(i.success_criteria))}</p>
               ${
                 files.length
-                  ? `<ul class="hint">${files
+                  ? `<ul class="hint" style="margin-bottom:0.75rem">${files
                       .map(
                         (f) =>
                           `<li><a href="/evidence/${f.id}" target="_blank" rel="noopener">${escapeHtml(f.original_name)}</a></li>`
@@ -904,7 +943,8 @@ app.get("/performance/:cycleId/self", route(async (req, res) => {
               </div>
               <div class="form-actions"><button type="submit">Save evidence &amp; status</button></div>
             </form>
-          </div>`;
+            </div>
+          </details>`;
         })
         .join("")}
       <div class="card">
@@ -1784,7 +1824,7 @@ app.get("/equity", route(async (req, res) => {
       "Equity",
       `${pageHeader(
         "Equity",
-        `Schedule A locked post–Founder Rebalance (${SCHEDULE_A_FOUNDER_OUTSTANDING} founder shares). Past contribution vested 15 Aug 2026; next service installment ${SCHEDULE_A_FIRST_VESTING_DATE}.`
+        `Schedule A locked post–Founder Rebalance (${SCHEDULE_A_FOUNDER_OUTSTANDING} founder shares). Past contribution vested 15 Aug 2026; next service installment ${formatDay(SCHEDULE_A_FIRST_VESTING_DATE)}.`
       )}
       ${callout("Seed writes these numbers as confirmed. Past contribution starts vested; service vests in 10 equal quarterly installments. No new shares are issued on a Vesting Date — ledger / escrow only.")}
       <div class="section-label">Schedule A</div>
@@ -1844,7 +1884,7 @@ app.get("/equity", route(async (req, res) => {
                 (r) => `<div class="list-row">
                   <div>
                     <div class="title">${escapeHtml(String(r.full_name))}</div>
-                    <div class="meta">${escapeHtml(String(r.vesting_date))} · ${
+                    <div class="meta">${escapeHtml(formatDay(String(r.vesting_date)))} · ${
                       r.status === "issued"
                         ? `+${r.shares_vested} → vested ${r.vested_total}, unvested ${r.unvested_remainder}`
                         : escapeHtml(String(r.hold_reason ?? "Hold"))
@@ -1980,7 +2020,7 @@ app.get("/audit", route(async (req, res) => {
                 ${rows
                   .map(
                     (r) => `<tr>
-                      <td class="muted">${escapeHtml(String(r.created_at).replace("T", " ").slice(0, 19))}</td>
+                      <td class="muted nowrap">${escapeHtml(formatDay(String(r.created_at)))} · ${escapeHtml(String(r.created_at).slice(11, 16))}</td>
                       <td>${escapeHtml(String(r.full_name ?? "system"))}</td>
                       <td><code>${escapeHtml(String(r.action))}</code></td>
                       <td class="muted">${escapeHtml(String(r.entity_type))}${r.entity_id ? ` · ${escapeHtml(String(r.entity_id).slice(0, 18))}` : ""}</td>
@@ -2162,7 +2202,7 @@ app.get("/finance/calls", route(async (req, res) => {
                 (call) => `<a class="list-row" href="/finance/calls/${call.id}" style="color:inherit;text-decoration:none">
                   <div>
                     <div class="title">${escapeHtml(call.title)}</div>
-                    <div class="meta">Due ${escapeHtml(call.due_on)} · ${escapeHtml(call.account_name || "No account")} · ${formatMoney(call.paid_cents, call.currency)} of ${formatMoney(call.total_cents, call.currency)} received</div>
+                    <div class="meta">Due ${escapeHtml(formatDay(call.due_on))} · ${escapeHtml(call.account_name || "No account")} · ${formatMoney(call.paid_cents, call.currency)} of ${formatMoney(call.total_cents, call.currency)} received</div>
                   </div>
                   <div class="aside">${statusPill(call.status === "settled" ? "Settled" : "Open", call.status === "settled" ? "ok" : "warn")}</div>
                 </a>`
@@ -2261,7 +2301,7 @@ app.get("/finance/calls/:id", route(async (req, res) => {
         `${crumbs([{ href: "/finance", label: "Finance" }, { href: "/finance/calls", label: "Cash calls" }, { label: call.title }])}
         ${pageHeader(
           call.title,
-          `${call.currency} · due ${call.due_on}`,
+          `${call.currency} · due ${formatDay(call.due_on)}`,
           `${canRecord ? `<a class="btn" href="/finance/calls/${call.id}/pay">Record payment</a>` : ""}<a class="btn secondary" href="/finance/calls">Back</a>`
         )}
         ${callout(call.purpose)}

@@ -28,6 +28,21 @@ export function addDays(isoDate: string, days: number) {
   return d.toISOString().slice(0, 10);
 }
 
+/** "2026-11-16" → "Mon 16 Nov" (adds the year when it isn't the current one). Unparseable input is returned as-is. */
+export function formatDay(isoDate: string | null | undefined) {
+  if (!isoDate) return "—";
+  const d = new Date(`${String(isoDate).slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return String(isoDate);
+  const sameYear = d.getUTCFullYear() === new Date().getUTCFullYear();
+  return d.toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    ...(sameYear ? {} : { year: "numeric" }),
+    timeZone: "UTC",
+  });
+}
+
 export function escapeHtml(s: string) {
   return s
     .replaceAll("&", "&amp;")

@@ -1,4 +1,4 @@
-import { escapeHtml } from "./util.js";
+import { escapeHtml, formatDay } from "./util.js";
 import type { Person } from "./auth.js";
 
 function navLink(href: string, label: string, currentPath: string) {
@@ -62,7 +62,7 @@ export function layout(
             (n) => `<a class="notif-item${n.read_at ? " read" : ""}" href="/notifications/${n.id}/open">
               <div class="title">${escapeHtml(n.title)}</div>
               <div class="meta">${escapeHtml(n.body)}</div>
-              ${n.due_on ? `<div class="meta">Due ${escapeHtml(n.due_on)}</div>` : ""}
+              ${n.due_on ? `<div class="meta">Due ${escapeHtml(formatDay(n.due_on))}</div>` : ""}
             </a>`
           )
           .join("");
@@ -95,8 +95,14 @@ export function layout(
 </head>
 <body>
   <div class="app-shell">
-    <aside class="sidebar">
-      <div class="sidebar-brand"><a href="/"><div class="sidebar-mark">K</div></a><a href="/">Kritly HRIS</a></div>
+    <div class="nav-scrim" data-nav-close hidden></div>
+    <aside class="sidebar" id="app-sidebar" aria-label="Main navigation">
+      <div class="sidebar-brand">
+        <a href="/"><div class="sidebar-mark">K</div></a><a href="/">Kritly HRIS</a>
+        <button type="button" class="icon-btn nav-close" data-nav-close aria-label="Close menu">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
       <nav class="sidebar-nav">
         <div>
           <div class="nav-group-label">Workspace</div>
@@ -125,6 +131,10 @@ export function layout(
     </aside>
     <div class="shell-main">
       <header class="topbar no-print">
+        <button type="button" class="icon-btn menu-btn" aria-controls="app-sidebar" aria-expanded="false" aria-label="Open menu">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
+        <a class="topbar-brand" href="/"><span class="sidebar-mark">K</span>Kritly HRIS</a>
         <div class="topbar-spacer"></div>
         <details class="notif-menu">
           <summary class="notif-bell" aria-label="Notifications${unread ? ` (${unread} unread)` : ""}">
@@ -147,6 +157,25 @@ export function layout(
       <main class="content">${body}</main>
     </div>
   </div>
+  <script>
+    (function () {
+      var shell = document.querySelector(".app-shell");
+      var btn = document.querySelector(".menu-btn");
+      var scrim = document.querySelector(".nav-scrim");
+      if (!shell || !btn || !scrim) return;
+      function set(open) {
+        shell.classList.toggle("nav-open", open);
+        btn.setAttribute("aria-expanded", String(open));
+        scrim.hidden = !open;
+        document.body.style.overflow = open ? "hidden" : "";
+        if (open) { var c = document.querySelector(".nav-close"); if (c) c.focus(); } else { btn.focus({ preventScroll: true }); }
+      }
+      btn.addEventListener("click", function () { set(!shell.classList.contains("nav-open")); });
+      document.querySelectorAll("[data-nav-close]").forEach(function (el) { el.addEventListener("click", function () { set(false); }); });
+      document.addEventListener("keydown", function (e) { if (e.key === "Escape" && shell.classList.contains("nav-open")) set(false); });
+      window.matchMedia("(min-width: 901px)").addEventListener("change", function (m) { if (m.matches && shell.classList.contains("nav-open")) set(false); });
+    })();
+  </script>
   ${naiIsland}
 </body>
 </html>`;
