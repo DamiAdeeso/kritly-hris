@@ -204,6 +204,8 @@ async function main() {
 
   // Week starting Monday 16 Nov 2026 through Saturday vest.
   // starts_on → ends_on midpoint is mid-quarter due (Wed 18).
+  const SALAM_NOTION_TITLE = "Notion workspace updates and necessary documentation";
+
   const NOV_DEADLINES = {
     periodStart: "2026-11-16",
     evidence: "2026-11-16",
@@ -253,6 +255,8 @@ async function main() {
       { emp: empDami, title: "Chat page improvement", objective: "Product quality" },
       { emp: empDami, title: "Training founders on the existing system", objective: "Operating cadence" },
       { emp: empDami, title: "Participation in the UX audit", objective: "Product quality" },
+      { emp: empDami, title: "HRIS", objective: "Operating cadence" },
+      { emp: empDami, title: "Nai v1", objective: "Product quality" },
       { emp: empFik, title: "UI improvements on the current application", objective: "Product quality" },
       { emp: empFik, title: "Paystack account setup", objective: "Payments readiness" },
       { emp: empFik, title: "WooCommerce store setup", objective: "Commerce channels" },
@@ -267,10 +271,13 @@ async function main() {
       { emp: empRid, title: "Review company restructure", objective: "Close governance package" },
       { emp: empSalam, title: "Stripe setup", objective: "Payments readiness" },
       { emp: empSalam, title: "Meta account setup", objective: "Channel readiness" },
-      { emp: empSalam, title: "Meeting notes", objective: "Operating cadence" },
+      { emp: empSalam, title: SALAM_NOTION_TITLE, objective: "Operating cadence" },
       { emp: empSalam, title: "Review merger documents", objective: "Close governance package" },
       { emp: empSalam, title: "Review company restructure", objective: "Close governance package" },
       { emp: empSalam, title: "Participation in the UX audit", objective: "Product quality" },
+      { emp: empSalam, title: "EIN application", objective: "Legal and compliance" },
+      { emp: empSalam, title: "Kritly Nigeria Limited registration", objective: "Legal and compliance" },
+      { emp: empSalam, title: "Acquiring phone number", objective: "Channel readiness" },
     ];
 
     for (const item of initiatives) {
@@ -291,6 +298,62 @@ async function main() {
       });
     }
     await audit({ actorId: dami, action: "cycle.open", entityType: "review_cycle", entityId: cycleId });
+  } else {
+    // Existing cycle: apply the 16 Nov task changes once. Only these specific tasks are
+    // touched, so anything removed in the app isn't resurrected on the next deploy.
+    const renamed = await prisma.initiative.updateMany({
+      where: { cycle_id: cycleId, employment_id: empSalam, title: "Meeting notes" },
+      data: { title: SALAM_NOTION_TITLE, success_criteria: `Demonstrate completion of: ${SALAM_NOTION_TITLE}` },
+    });
+    if (renamed.count > 0) {
+      await audit({
+        actorId: dami,
+        action: "initiative.rename",
+        entityType: "review_cycle",
+        entityId: cycleId,
+        before: { title: "Meeting notes" },
+        after: { title: SALAM_NOTION_TITLE },
+        reason: "Seeded task update",
+      });
+    }
+    const additions: { emp: string; title: string; objective: string }[] = [
+      { emp: empDami, title: "HRIS", objective: "Operating cadence" },
+      { emp: empDami, title: "Nai v1", objective: "Product quality" },
+      { emp: empSalam, title: "EIN application", objective: "Legal and compliance" },
+      { emp: empSalam, title: "Kritly Nigeria Limited registration", objective: "Legal and compliance" },
+      { emp: empSalam, title: "Acquiring phone number", objective: "Channel readiness" },
+    ];
+    for (const item of additions) {
+      const exists = await prisma.initiative.findFirst({
+        where: { cycle_id: cycleId, employment_id: item.emp, title: item.title },
+        select: { id: true },
+      });
+      if (exists) continue;
+      const iniId = id("ini");
+      await prisma.initiative.create({
+        data: {
+          id: iniId,
+          cycle_id: cycleId,
+          employment_id: item.emp,
+          title: item.title,
+          company_objective: item.objective,
+          success_criteria: `Demonstrate completion of: ${item.title}`,
+          start_date: NOV_DEADLINES.periodStart,
+          due_date: NOV_DEADLINES.evidence,
+          status: "in_progress",
+          weight: 1,
+          evidence_ref: null,
+        },
+      });
+      await audit({
+        actorId: dami,
+        action: "initiative.add",
+        entityType: "initiative",
+        entityId: iniId,
+        after: { title: item.title, objective: item.objective },
+        reason: "Seeded task update",
+      });
+    }
   }
 
   await prisma.reviewCycle.update({
