@@ -27,7 +27,7 @@ import {
   listCompanyAccounts,
   outstandingByCurrency,
 } from "../services/financeService.js";
-import { listEvidenceFiles } from "../services/evidenceService.js";
+import { isEvidenceAvailable, listEvidenceFiles } from "../services/evidenceService.js";
 import { getMemoForViewer } from "../services/reviewService.js";
 import { assertCanViewPlan, getPlan } from "../services/escalationService.js";
 
@@ -264,7 +264,7 @@ export function registerNaiReadRoutes(
         const evidence: { name: string; type: string; href: string }[] = [];
         for (const ini of initiatives) {
           const files = await listEvidenceFiles(ini.id);
-          for (const f of files) {
+          for (const f of files.filter(isEvidenceAvailable)) {
             evidence.push({
               name: f.original_name,
               type: f.mime,

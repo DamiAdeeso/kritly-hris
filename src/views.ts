@@ -210,8 +210,23 @@ export function emptyState(message: string) {
   return `<div class="empty">${escapeHtml(message)}</div>`;
 }
 
-export function callout(message: string) {
-  return `<div class="callout">${escapeHtml(message)}</div>`;
+export function callout(message: string, tone: "" | "warn" = "") {
+  return `<div class="callout${tone ? ` ${tone}` : ""}">${escapeHtml(message)}</div>`;
+}
+
+/** Evidence files for a task. Files whose bytes were lost read as "Lost", not as dead links. */
+export function evidenceFileList(
+  files: { id: string; original_name: string; storage: string }[],
+  lostHint: string
+) {
+  if (!files.length) return "";
+  return `<ul class="evidence-files">${files
+    .map((f) =>
+      f.storage === "s3"
+        ? `<li><a href="/evidence/${escapeHtml(f.id)}" target="_blank" rel="noopener">${escapeHtml(f.original_name)}</a></li>`
+        : `<li class="lost"><span class="lost-name">${escapeHtml(f.original_name)}</span>${statusPill("Lost", "bad")}<span class="muted">${escapeHtml(lostHint)}</span></li>`
+    )
+    .join("")}</ul>`;
 }
 
 export function avatar(name: string) {

@@ -456,6 +456,14 @@ tbody tr:hover td { background: hsl(var(--hover) / 0.55); }
   padding: 0.75rem 0.9rem; border-radius: 0 var(--radius-md) var(--radius-md) 0;
   font-size: 0.875rem; line-height: 1.45; margin-bottom: 0.85rem;
 }
+.callout.warn {
+  border-left-color: hsl(var(--warning-muted-foreground));
+  background: hsl(var(--warning-muted));
+  color: hsl(var(--warning-muted-foreground));
+}
+.evidence-files { list-style: none; padding: 0; margin: 0 0 0.75rem; font-size: 0.875rem; }
+.evidence-files li { padding: 0.2rem 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+.evidence-files .lost-name { text-decoration: line-through; color: hsl(var(--muted-foreground)); }
 
 .auth-wrap {
   min-height: 100vh;

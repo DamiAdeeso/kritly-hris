@@ -16,13 +16,18 @@ export const EVIDENCE_ALLOWED_MIME = new Set([
 
 export const EVIDENCE_MAX_BYTES = 15 * 1024 * 1024;
 
+/** A file counts as evidence only while its bytes are stored; pre-S3 rows were lost. */
+export function isEvidenceAvailable(file: { storage: string }) {
+  return file.storage === S3_STORAGE;
+}
+
 export async function initiativeHasEvidence(initiativeId: string) {
   const row = await prisma.initiative.findUnique({
     where: { id: initiativeId },
     select: { evidence_ref: true },
   });
   if (String(row?.evidence_ref || "").trim()) return true;
-  const files = await prisma.evidenceFile.count({ where: { initiative_id: initiativeId } });
+  const files = await prisma.evidenceFile.count({ where: { initiative_id: initiativeId, storage: S3_STORAGE } });
   return files > 0;
 }
 
@@ -34,7 +39,7 @@ export async function missingEvidenceCount(cycleId: string, employmentId: string
   let missing = 0;
   for (const r of rows) {
     if (String(r.evidence_ref || "").trim()) continue;
-    const files = await prisma.evidenceFile.count({ where: { initiative_id: r.id } });
+    const files = await prisma.evidenceFile.count({ where: { initiative_id: r.id, storage: S3_STORAGE } });
     if (files === 0) missing += 1;
   }
   return missing;

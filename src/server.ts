@@ -4,7 +4,7 @@ import path from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { migrate, prisma } from "./db.js";
-import { layout, pageHeader, crumbs, statusPill, emptyState, callout, avatar, authLoginBody, authForgotBody, authResetBody } from "./views.js";
+import { layout, pageHeader, crumbs, statusPill, emptyState, callout, evidenceFileList, avatar, authLoginBody, authForgotBody, authResetBody } from "./views.js";
 import {
   login,
   logout,
@@ -62,7 +62,7 @@ import {
   deriveOverallFromDimensions,
 } from "./services/deriveScores.js";
 import { confirmScheduleA, issueVestingForCycle } from "./services/equityService.js";
-import { listEvidenceFiles } from "./services/evidenceService.js";
+import { isEvidenceAvailable, listEvidenceFiles } from "./services/evidenceService.js";
 import { checkEvidenceStorage } from "./services/evidenceStorage.js";
 import { listAffiliatesForPerson } from "./services/peopleService.js";
 import { registerQuarterExtras } from "./routes/quarterExtras.js";
@@ -890,8 +890,17 @@ app.get("/performance/:cycleId/self", route(async (req, res) => {
       )}
       ${callout("Directors score only what you post here. A link or a file counts as evidence.")}
       ${(() => {
+        const lost = [...filesByIni.values()].flat().filter((f) => !isEvidenceAvailable(f)).length;
+        if (!lost) return "";
+        return callout(
+          `${lost} of your uploaded file${lost === 1 ? " was" : "s were"} lost in a storage problem on our side. ` +
+            `Tasks marked "Re-upload needed" are open below: upload the file again, keep your status, add a note and save. Uploads are now stored permanently.`,
+          "warn"
+        );
+      })()}
+      ${(() => {
         const withEvidence = initiatives.filter(
-          (i) => String(i.evidence_ref ?? "").trim() || (filesByIni.get(String(i.id)) || []).length
+          (i) => String(i.evidence_ref ?? "").trim() || (filesByIni.get(String(i.id)) || []).some(isEvidenceAvailable)
         ).length;
         const pct = initiatives.length ? Math.round((withEvidence / initiatives.length) * 100) : 0;
         return `<div class="progress-line">
@@ -903,9 +912,10 @@ app.get("/performance/:cycleId/self", route(async (req, res) => {
         .map((i) => {
           const files = filesByIni.get(String(i.id)) || [];
           const status = normalizeInitiativeStatus(i.status);
-          const hasEvidence = Boolean(String(i.evidence_ref ?? "").trim() || files.length);
+          const hasEvidence = Boolean(String(i.evidence_ref ?? "").trim() || files.some(isEvidenceAvailable));
+          const needsReupload = files.some((f) => !isEvidenceAvailable(f));
           const justSaved = String(req.query.saved || "") === String(i.id);
-          return `<details class="card task-card" id="ini-${escapeHtml(String(i.id))}"${justSaved ? " open" : ""}>
+          return `<details class="card task-card" id="ini-${escapeHtml(String(i.id))}"${justSaved || needsReupload ? " open" : ""}>
             <summary>
               <div class="task-summary">
                 <h2>${escapeHtml(String(i.title))}</h2>
@@ -913,22 +923,14 @@ app.get("/performance/:cycleId/self", route(async (req, res) => {
                 <div class="task-pills">
                   ${initiativeStatusPill(status)}
                   ${hasEvidence ? statusPill("Evidence added", "ok") : statusPill("No evidence yet", "neutral")}
+                  ${needsReupload ? statusPill("Re-upload needed", "warn") : ""}
                   ${justSaved ? statusPill("Saved", "ok") : ""}
                 </div>
               </div>
             </summary>
             <div class="task-body">
             <form method="post" action="/performance/${cycle.id}/initiative/${i.id}/status" enctype="multipart/form-data">
-              ${
-                files.length
-                  ? `<ul class="hint" style="margin-bottom:0.75rem">${files
-                      .map(
-                        (f) =>
-                          `<li><a href="/evidence/${f.id}" target="_blank" rel="noopener">${escapeHtml(f.original_name)}</a></li>`
-                      )
-                      .join("")}</ul>`
-                  : ""
-              }
+              ${evidenceFileList(files, "Upload it again below.")}
               <div class="field-grid">
                 <div class="field"><label>Status</label>
                   <select name="status">
@@ -1089,8 +1091,9 @@ app.get("/performance/:cycleId/subject/:employmentId", route(async (req, res) =>
   const alreadySealed = canSeal && (await hasSealedSheet(cycle.id, subject.id, req.person!.id));
   const draft = canSeal ? await getScoreDraft(cycle.id, subject.id, req.person!.id) : undefined;
   const missingEvidence = initiatives.filter(
-    (i) => !String(i.evidence_ref || "").trim() && !(filesByIni.get(i.id) || []).length
+    (i) => !String(i.evidence_ref || "").trim() && !(filesByIni.get(i.id) || []).some(isEvidenceAvailable)
   );
+  const lostFiles = [...filesByIni.values()].flat().filter((f) => !isEvidenceAvailable(f)).length;
   res.send(
     await page(
       req,
@@ -1121,6 +1124,15 @@ app.get("/performance/:cycleId/subject/:employmentId", route(async (req, res) =>
           : callout("No self-assessment yet. Ask the founder to submit one under My evidence before you score.")
       }
       ${missingEvidence.length ? callout(`${missingEvidence.length} initiative(s) still missing evidence from the reviewee.`) : ""}
+      ${
+        lostFiles
+          ? callout(
+              `${lostFiles} file${lostFiles === 1 ? " was" : "s were"} lost in a storage problem on our side, not withheld by the founder. ` +
+                `They are marked Lost below until the founder uploads them again.`,
+              "warn"
+            )
+          : ""
+      }
       <div class="section-label">Initiatives &amp; evidence</div>
       ${initiatives
         .map((i) => {
@@ -1134,9 +1146,7 @@ app.get("/performance/:cycleId/subject/:employmentId", route(async (req, res) =>
               <dt>Evidence (from reviewee)</dt><dd>${evidenceLinkHtml(i.evidence_ref as string | undefined)}</dd>
               ${
                 (filesByIni.get(i.id) || []).length
-                  ? `<dt>Files</dt><dd>${(filesByIni.get(i.id) || [])
-                      .map((f) => `<a href="/evidence/${f.id}" target="_blank" rel="noopener">${escapeHtml(f.original_name)}</a>`)
-                      .join(" · ")}</dd>`
+                  ? `<dt>Files</dt><dd>${evidenceFileList(filesByIni.get(i.id) || [], "Awaiting re-upload.")}</dd>`
                   : ""
               }
             </dl>
