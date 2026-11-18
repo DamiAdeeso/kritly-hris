@@ -45,11 +45,17 @@ export async function missingEvidenceCount(cycleId: string, employmentId: string
   return missing;
 }
 
+/**
+ * A task's evidence files. A lost file is left out once a stored file with the same
+ * name is on the same task: the founder has already uploaded it again.
+ */
 export async function listEvidenceFiles(initiativeId: string) {
-  return prisma.evidenceFile.findMany({
+  const files = await prisma.evidenceFile.findMany({
     where: { initiative_id: initiativeId },
     orderBy: { created_at: "asc" },
   });
+  const reuploaded = new Set(files.filter(isEvidenceAvailable).map((f) => f.original_name));
+  return files.filter((f) => isEvidenceAvailable(f) || !reuploaded.has(f.original_name));
 }
 
 export async function saveEvidenceFile(input: {
