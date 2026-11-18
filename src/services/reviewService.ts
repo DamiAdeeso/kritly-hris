@@ -5,7 +5,7 @@ import { consequenceForRating, type PolicyBody } from "../policy.js";
 import { getPolicyById } from "./policyService.js";
 import { addDays, id, nowIso } from "../util.js";
 import { cycleDeadlines, notifyPerson } from "./notificationService.js";
-import { buildDecisionBoard, buildMemoFeedback, type MemoFeedback } from "./deriveScores.js";
+import { buildDecisionBoard, buildMemoFeedback, votingOpens, type MemoFeedback } from "./deriveScores.js";
 import { assertCycleAdopted } from "./cycleGuards.js";
 
 /** Pure rule: all eligible directors voted and accepts are below majority. */
@@ -116,6 +116,22 @@ export function requiredMajority(disinterestedCount: number) {
   return Math.floor(disinterestedCount / 2) + 1;
 }
 
+/** Sealed sheets from Disinterested Directors only; a recused director's sheet never counts. */
+export async function eligibleSheetCount(cycleId: string, subjectEmploymentId: string, eligibleIds: string[]) {
+  if (!eligibleIds.length) return 0;
+  return prisma.sealedScoreSheet.count({
+    where: { cycle_id: cycleId, subject_employment_id: subjectEmploymentId, scorer_person_id: { in: eligibleIds } },
+  });
+}
+
+/** Once anyone has voted on a subject's average, the sheets behind it are frozen. */
+export async function ballotsStarted(cycleId: string, subjectEmploymentId: string) {
+  const n = await prisma.adoptionBallot.count({
+    where: { cycle_id: cycleId, subject_employment_id: subjectEmploymentId },
+  });
+  return n > 0;
+}
+
 export async function submitSealedSheet(
   actorId: string,
   cycleId: string,
@@ -131,6 +147,17 @@ export async function submitSealedSheet(
   });
   if (subject.person_id === actorId) {
     throw Object.assign(new Error("Cannot score yourself"), { status: 400 });
+  }
+  const policy = await policyForCycle(cycle);
+  const eligible = await disinterestedDirectors(subject.person_id, policy);
+  if (!eligible.some((d) => d.id === actorId)) {
+    throw Object.assign(new Error("You are recused from scoring this person"), { status: 403 });
+  }
+  if (await ballotsStarted(cycleId, subjectEmploymentId)) {
+    throw Object.assign(
+      new Error("Voting on this person's average has started, so score sheets are closed. You can still accept or decline the average."),
+      { status: 400 }
+    );
   }
   const sid = id("score");
   await prisma.sealedScoreSheet.upsert({
@@ -156,23 +183,20 @@ export async function submitSealedSheet(
     },
   });
   await audit({ actorId, action: "score.seal", entityType: "sealed_score_sheet", entityId: subjectEmploymentId });
-  const policy = await policyForCycle(cycle);
   const subjectPerson = await prisma.person.findUniqueOrThrow({
     where: { id: subject.person_id },
     select: { full_name: true },
   });
   const deadlines = await cycleDeadlines(cycle);
-  const eligible = await disinterestedDirectors(subject.person_id, policy);
-  const sheetCount = await prisma.sealedScoreSheet.count({
-    where: { cycle_id: cycleId, subject_employment_id: subjectEmploymentId },
-  });
-  if (sheetCount >= eligible.length && eligible.length > 0) {
+  const sheetCount = await eligibleSheetCount(cycleId, subjectEmploymentId, eligible.map((d) => d.id));
+  // dedupeKey keeps this to one notice per director, sent when voting first opens.
+  if (votingOpens(policy, eligible.length, sheetCount)) {
     for (const voter of eligible) {
       await notifyPerson({
         personId: voter.id,
         kind: "vote_ready",
         title: `Your vote · ${subjectPerson.full_name}`,
-        body: `All scores are in for ${cycle.name}. Accept or decline the average. Due ${deadlines.votesDueOn}.`,
+        body: `Voting is open for ${cycle.name}. Review the evidence, then accept or decline the average. You don't need to score first. Due ${deadlines.votesDueOn}.`,
         href: `/performance/${cycleId}/subject/${subjectEmploymentId}/vote`,
         dueOn: deadlines.votesDueOn,
         dedupeKey: `vote_ready:${cycleId}:${subjectEmploymentId}:${voter.id}`,
@@ -225,8 +249,13 @@ export async function castBallot(input: {
   cycleId: string;
   subjectEmploymentId: string;
   decision: "accept" | "decline";
+  /** The director confirms they reviewed the evidence packet (Schedule C §5(c)); required whether or not they scored. */
+  reviewedEvidence: boolean;
 }) {
   await requirePerm(input.actorId, "review.vote");
+  if (!input.reviewedEvidence) {
+    throw Object.assign(new Error("Confirm you reviewed the evidence packet before you vote"), { status: 400 });
+  }
   const cycle = await getCycle(input.cycleId);
   assertCycleAdopted(cycle);
   if (cycle.ratings_published) throw Object.assign(new Error("Ratings already published"), { status: 400 });
@@ -272,8 +301,11 @@ export async function castBallot(input: {
       scorer_name: s.scorer.full_name,
     })),
   });
-  if (!board.complete) {
-    throw Object.assign(new Error("All sealed scores are required before anyone can accept the average"), { status: 400 });
+  if (!board.votingOpen) {
+    throw Object.assign(
+      new Error(`Voting opens once ${board.sheetsNeeded} sealed score sheet${board.sheetsNeeded === 1 ? " is" : "s are"} in`),
+      { status: 400 }
+    );
   }
   if (input.decision === "accept" && board.derivedAverageRating <= 2 && !board.suggestedMissedCriterion) {
     throw Object.assign(
@@ -301,7 +333,15 @@ export async function castBallot(input: {
     action: "review.ballot",
     entityType: "adoption_ballot",
     entityId: input.subjectEmploymentId,
-    after: { decision: input.decision, accepts: accepts.length, need },
+    after: {
+      decision: input.decision,
+      accepts: accepts.length,
+      need,
+      sealedOwnSheet: board.perScorer.some((s) => s.scorerId === input.actorId),
+      averageAtVote: board.derivedAverageRating,
+      sheetsAtVote: board.sheetCount,
+      reviewedEvidence: true,
+    },
   });
 
   if (accepts.length < need) {
@@ -311,7 +351,7 @@ export async function castBallot(input: {
   const rating = board.derivedAverageRating;
   const missed = rating <= 2 ? board.suggestedMissedCriterion : undefined;
   const feedback = buildMemoFeedback(board, policy);
-  const adoptionNote = `Majority accepted derived average ${rating} (${accepts.length} of ${disinterested.length}; raw mean ${board.averageRaw.toFixed(2)}).`;
+  const adoptionNote = `Majority accepted derived average ${rating} (${accepts.length} of ${disinterested.length}; raw mean ${board.averageRaw.toFixed(2)} from ${board.sheetCount} sealed score sheet${board.sheetCount === 1 ? "" : "s"}).`;
   const result = await castVote({
     actorId: input.actorId,
     cycleId: input.cycleId,

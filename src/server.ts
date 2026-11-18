@@ -56,10 +56,13 @@ import {
   allSubjectsVoted,
   getMemoForViewer,
   voteFailedCanRescore,
+  ballotsStarted,
+  eligibleSheetCount,
 } from "./services/reviewService.js";
 import {
   buildDecisionBoard,
   deriveOverallFromDimensions,
+  votingOpens,
 } from "./services/deriveScores.js";
 import { confirmScheduleA, issueVestingForCycle } from "./services/equityService.js";
 import { isEvidenceAvailable, listEvidenceFiles } from "./services/evidenceService.js";
@@ -729,13 +732,11 @@ app.get("/performance/:cycleId", route(async (req, res) => {
         });
         const isSelf = s.person_id === req.person!.id;
         const directors = await disinterestedDirectors(s.person_id, policy);
-        const sheetCount = await prisma.sealedScoreSheet.count({
-          where: { cycle_id: cycle.id, subject_employment_id: s.id },
-        });
+        const sheetCount = await eligibleSheetCount(cycle.id, s.id, directors.map((d) => d.id));
         const ballots = await listBallots(cycle.id, s.id);
         const mine = ballots.find((b) => b.voter_person_id === req.person!.id);
         const iVote = directors.some((d) => d.id === req.person!.id);
-        const ready = directors.length > 0 && sheetCount >= directors.length;
+        const ready = votingOpens(policy, directors.length, sheetCount);
         const allBallotsIn = directors.length > 0 && ballots.length >= directors.length;
         const sealed = iVote && (await hasSealedSheet(cycle.id, s.id, req.person!.id));
         let statusLabel = "In review";
@@ -1084,11 +1085,24 @@ app.get("/performance/:cycleId/subject/:employmentId", route(async (req, res) =>
     req.params.cycleId,
     req.params.employmentId
   );
-  const canSeal = ((await can(req.person!.id, "score.seal"))) && req.person!.id !== subject.person_id;
-  const mayVote =
-    (await can(req.person!.id, "review.vote")) &&
-    (await disinterestedDirectors(subject.person_id, policy)).some((d) => d.id === req.person!.id);
+  const directors = await disinterestedDirectors(subject.person_id, policy);
+  const isDisinterested = directors.some((d) => d.id === req.person!.id);
+  const canSeal = (await can(req.person!.id, "score.seal")) && isDisinterested;
+  const mayVote = (await can(req.person!.id, "review.vote")) && isDisinterested;
   const alreadySealed = canSeal && (await hasSealedSheet(cycle.id, subject.id, req.person!.id));
+  const scoringClosed = await ballotsStarted(cycle.id, subject.id);
+  const votingOpen =
+    mayVote && votingOpens(policy, directors.length, await eligibleSheetCount(cycle.id, subject.id, directors.map((d) => d.id)));
+  const myBallot = mayVote ? (await listBallots(cycle.id, subject.id)).find((b) => b.voter_person_id === req.person!.id) : undefined;
+  const voteHref = `/performance/${cycle.id}/subject/${subject.id}/vote`;
+  const acceptCard =
+    votingOpen && !myBallot
+      ? `<div class="card">
+          <div class="card-head"><h2>Accept the average</h2></div>
+          <p class="hint" style="margin-bottom:0.85rem">Voting is open. Once you've read the packet above, you can accept or decline the directors' average without scoring.</p>
+          <div class="form-actions"><a class="btn" href="${voteHref}">Review the average</a></div>
+        </div>`
+      : "";
   const draft = canSeal ? await getScoreDraft(cycle.id, subject.id, req.person!.id) : undefined;
   const missingEvidence = initiatives.filter(
     (i) => !String(i.evidence_ref || "").trim() && !(filesByIni.get(i.id) || []).some(isEvidenceAvailable)
@@ -1107,8 +1121,8 @@ app.get("/performance/:cycleId/subject/:employmentId", route(async (req, res) =>
       ])}
       ${pageHeader(
         subject.full_name,
-        "Read the packet, then score in steps: initiatives → delivery → other dimensions → seal. Your accept or decline is a separate vote.",
-        `${mayVote ? `<a class="btn" href="/performance/${cycle.id}/subject/${subject.id}/vote">Your vote</a>` : ""}<a class="btn secondary" href="/performance/${cycle.id}">Back</a>`
+        "Read the packet, then either score in steps (initiatives → delivery → other dimensions → seal) or, once voting opens, accept the average without scoring.",
+        `${mayVote ? `<a class="btn" href="${voteHref}">Your vote</a>` : ""}<a class="btn secondary" href="/performance/${cycle.id}">Back</a>`
       )}
       <div class="section-label">Reviewee packet</div>
       ${
@@ -1166,20 +1180,33 @@ app.get("/performance/:cycleId/subject/:employmentId", route(async (req, res) =>
           </div>`;
         })
         .join("")}
+      ${acceptCard}
       ${
         canSeal
           ? alreadySealed
             ? callout("Your score sheet is already sealed for this person.")
-            : `<div class="card">
-                <div class="card-head"><h2>Score this founder</h2></div>
-                <p class="hint" style="margin-bottom:0.85rem">Guided flow: packet → initiative outcomes → Delivery (from those outcomes) → other dimensions → review &amp; seal.</p>
+            : scoringClosed
+              ? callout(
+                  myBallot
+                    ? "Your vote is recorded. Score sheets are closed for this person."
+                    : "Voting on the average has started, so score sheets are closed. You can still accept or decline the average."
+                )
+              : `<div class="card">
+                <div class="card-head"><h2>${votingOpen ? "Or score this founder" : "Score this founder"}</h2></div>
+                <p class="hint" style="margin-bottom:0.85rem">Guided flow: packet → initiative outcomes → Delivery (from those outcomes) → other dimensions → review &amp; seal.${
+                  votingOpen ? " Scoring closes once the first vote on the average is cast." : ""
+                }</p>
                 <div class="form-actions">
                   <a class="btn" href="/performance/${cycle.id}/subject/${subject.id}/seal?step=${draft?.step && draft.step > 1 ? draft.step : 1}">${
                     draft ? "Continue scoring" : "Start scoring"
                   }</a>
                 </div>
               </div>`
-          : callout("You cannot seal a score sheet for this person from this account.")
+          : callout(
+              req.person!.id === subject.person_id || !(await can(req.person!.id, "score.seal"))
+                ? "You cannot seal a score sheet for this person from this account."
+                : "You are recused from scoring and voting on this person."
+            )
       }`
     )
   );
@@ -1190,11 +1217,14 @@ app.get("/performance/:cycleId/subject/:employmentId/seal", route(async (req, re
     const step = Math.min(5, Math.max(1, Number(req.query.step || 1) || 1));
     const ctx = await loadSubjectContext(req.params.cycleId, req.params.employmentId);
     const { cycle, policy, subject, initiatives, selfRow, selfBody, updatesByIni, filesByIni } = ctx;
-    if (!((await can(req.person!.id, "score.seal"))) || req.person!.id === subject.person_id) {
+    if (
+      !(await can(req.person!.id, "score.seal")) ||
+      !(await disinterestedDirectors(subject.person_id, policy)).some((d) => d.id === req.person!.id)
+    ) {
       res.status(403).send(await page(req, "Forbidden", "You cannot score this person."));
       return;
     }
-    if (await hasSealedSheet(cycle.id, subject.id, req.person!.id)) {
+    if ((await hasSealedSheet(cycle.id, subject.id, req.person!.id)) || (await ballotsStarted(cycle.id, subject.id))) {
       res.redirect(`/performance/${cycle.id}/subject/${subject.id}`);
       return;
     }
@@ -1391,8 +1421,15 @@ app.post("/performance/:cycleId/subject/:employmentId/seal/step/:step", route(as
     const step = Number(req.params.step);
     const ctx = await loadSubjectContext(req.params.cycleId, req.params.employmentId);
     const { cycle, policy, subject, initiatives } = ctx;
-    if (!((await can(req.person!.id, "score.seal"))) || req.person!.id === subject.person_id) {
+    if (
+      !(await can(req.person!.id, "score.seal")) ||
+      !(await disinterestedDirectors(subject.person_id, policy)).some((d) => d.id === req.person!.id)
+    ) {
       res.status(403).send(await page(req, "Forbidden", "Forbidden"));
+      return;
+    }
+    if (await ballotsStarted(cycle.id, subject.id)) {
+      res.redirect(`/performance/${cycle.id}/subject/${subject.id}`);
       return;
     }
     const existing = await getScoreDraft(cycle.id, subject.id, req.person!.id);
@@ -1548,6 +1585,10 @@ app.get("/performance/:cycleId/subject/:employmentId/vote", route(async (req, re
     const mine = ballots.find((b) => b.voter_person_id === req.person!.id);
     const acceptCount = ballots.filter((b) => b.decision === "accept").length;
     const eligibleHere = disinterested.some((d) => d.id === req.person!.id);
+    const iSealed = board.perScorer.some((p) => p.scorerId === req.person!.id);
+    const canStillScore =
+      eligibleHere && !iSealed && !existing && ballots.length === 0 && (await can(req.person!.id, "score.seal"));
+    const sheetsWord = (n: number) => `${n} sealed score sheet${n === 1 ? "" : "s"}`;
 
     res.send(
       await page(
@@ -1560,19 +1601,26 @@ app.get("/performance/:cycleId/subject/:employmentId/vote", route(async (req, re
         ])}
         ${pageHeader(
           `Your vote · ${subject.full_name}`,
-          `Scores are already in. You only say whether you accept the average. It is adopted when ${need} of ${disinterested.length} accept.`,
+          `Accept or decline the directors' average. You don't need to score first. It is adopted when ${need} of ${disinterested.length} accept.`,
           `<a class="btn secondary" href="/performance/${cycle.id}">Back to cycle</a>`
         )}
         ${
           existing
             ? callout(`Adopted: rating ${existing.rating} · ${existing.consequence}. ${acceptCount} accepted.`)
-            : board.complete
+            : board.votingOpen
               ? callout(
                   ballots.length >= disinterested.length
                     ? `Everyone has voted. ${acceptCount} accepted and ${ballots.length - acceptCount} declined. The average was not adopted.`
                     : `${acceptCount} of ${need} needed have accepted. ${ballots.length - acceptCount} declined.`
                 )
-              : callout(`Waiting on sealed scores: ${board.sheetCount} of ${board.eligibleCount}. Voting opens when every score is in.`)
+              : callout(
+                  `Waiting on sealed scores: ${board.sheetCount} of ${board.sheetsNeeded} needed. Voting opens once ${sheetsWord(board.sheetsNeeded)} ${board.sheetsNeeded === 1 ? "is" : "are"} in.`
+                )
+        }
+        ${
+          canStillScore && board.votingOpen
+            ? `<div class="callout no-print">This average comes from ${escapeHtml(sheetsWord(board.sheetCount))}. If you'd rather add your own scores, <a href="/performance/${cycle.id}/subject/${subject.id}">score this founder</a> before anyone votes. Score sheets close once the first vote is cast.</div>`
+            : ""
         }
         ${
           !existing &&
@@ -1667,7 +1715,7 @@ app.get("/performance/:cycleId/subject/:employmentId/vote", route(async (req, re
           </ul>
         </div>
         ${
-          existing || mine || !eligibleHere || !board.complete
+          existing || mine || !eligibleHere || !board.votingOpen
             ? mine
               ? callout(`Your vote is recorded: ${mine.decision === "accept" ? "accepted" : "declined"} the average.`)
               : !eligibleHere
@@ -1685,6 +1733,12 @@ app.get("/performance/:cycleId/subject/:employmentId/vote", route(async (req, re
             <label>
               <input type="radio" name="decision" value="decline" required />
               <span>I do not accept the average</span>
+            </label>
+          </div>
+          <div class="choice">
+            <label>
+              <input type="checkbox" name="reviewed_evidence" value="1" required />
+              <span>I have reviewed ${escapeHtml(subject.full_name)}'s evidence packet${iSealed ? "" : " (initiatives, evidence and self-assessment)"}</span>
             </label>
           </div>
           <div class="form-actions"><button type="submit">Submit my vote</button></div>
@@ -1709,6 +1763,7 @@ app.post("/performance/:cycleId/subject/:employmentId/vote", route(async (req, r
       cycleId: req.params.cycleId,
       subjectEmploymentId: req.params.employmentId,
       decision,
+      reviewedEvidence: req.body.reviewed_evidence === "1",
     });
     res.redirect(`/performance/${req.params.cycleId}/subject/${req.params.employmentId}/vote`);
   } catch (e) {

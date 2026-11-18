@@ -56,6 +56,11 @@ export const PolicyBodySchema = z.object({
     recuse_subject: z.boolean(),
     recuse_affiliates: z.boolean(),
     nominee_not_affiliate_may_vote: z.boolean(),
+    /**
+     * Sealed score sheets needed before disinterested directors can accept or decline the average.
+     * Directors who don't score can accept the average without sealing a sheet. Capped at the eligible count.
+     */
+    min_sealed_sheets_to_vote: z.number().int().min(1).default(1),
   }),
   fiscal: z.object({
     fiscal_year_type: z.enum(["calendar", "custom"]),
@@ -122,6 +127,7 @@ export const DEFAULT_POLICY: PolicyBody = {
     recuse_subject: true,
     recuse_affiliates: true,
     nominee_not_affiliate_may_vote: true,
+    min_sealed_sheets_to_vote: 1,
   },
   fiscal: {
     fiscal_year_type: "calendar",

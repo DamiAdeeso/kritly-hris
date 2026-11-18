@@ -2,7 +2,9 @@ import { prisma } from "../db.js";
 import { id, nowIso, addDays } from "../util.js";
 import { can } from "../rbac.js";
 import {
+  ballotsStarted,
   disinterestedDirectors,
+  eligibleSheetCount,
   employmentForPerson,
   getCycle,
   listCycles,
@@ -11,6 +13,7 @@ import {
   type Cycle,
 } from "./reviewService.js";
 import { missingEvidenceCount } from "./evidenceService.js";
+import { votingOpens } from "./deriveScores.js";
 
 export type Notification = {
   id: string;
@@ -284,17 +287,28 @@ export async function tasksForPerson(personId: string): Promise<PersonTask[]> {
         const interested = policy.voting.recuse_affiliates && (await isAffiliatePair(personId, subject.person_id));
         if (interested) continue;
         const sealed = await hasSealedSheet(cycle.id, subject.id, personId);
+        // Scoring is optional once voting opens; it closes for good when the first vote is cast.
+        const closed = !sealed && (await ballotsStarted(cycle.id, subject.id));
+        const done = sealed || closed;
         tasks.push({
           key: `seal:${cycle.id}:${subject.id}:${personId}`,
-          title: sealed ? `Scored ${subject.full_name}` : `Seal score sheet · ${subject.full_name}`,
+          title: sealed
+            ? `Scored ${subject.full_name}`
+            : closed
+              ? `Scoring closed · ${subject.full_name}`
+              : `Seal score sheet · ${subject.full_name}`,
           body: sealed
             ? "Your sealed sheet is in."
-            : "Read their evidence packet, then seal dimension scores (1–5).",
-          href: `/performance/${cycle.id}/subject/${subject.id}/seal?step=1`,
+            : closed
+              ? "Voting has started, so score sheets are closed. Your vote on the average is a separate task."
+              : "Read their evidence packet, then seal dimension scores (1–5). Optional once voting opens: you can accept the average instead.",
+          href: closed
+            ? `/performance/${cycle.id}/subject/${subject.id}/vote`
+            : `/performance/${cycle.id}/subject/${subject.id}/seal?step=1`,
           dueOn: d.scoresDueOn,
           kind: "score_seal",
-          done: sealed,
-          overdue: !sealed && d.scoresDueOn < today,
+          done,
+          overdue: !done && d.scoresDueOn < today,
         });
       }
     }
@@ -302,21 +316,18 @@ export async function tasksForPerson(personId: string): Promise<PersonTask[]> {
     if (await can(personId, "review.vote")) {
       const subjects = await subjectEmployments(cycle.id);
       for (const subject of subjects) {
-        const eligible = (await disinterestedDirectors(subject.person_id, policy)).some((d) => d.id === personId);
-        if (!eligible) continue;
+        const directors = await disinterestedDirectors(subject.person_id, policy);
+        if (!directors.some((d) => d.id === personId)) continue;
         const voted = await hasOwnBallot(cycle.id, subject.id, personId);
-        const sheetCount = await prisma.sealedScoreSheet.count({
-          where: { cycle_id: cycle.id, subject_employment_id: subject.id },
-        });
-        const need = (await disinterestedDirectors(subject.person_id, policy)).length;
-        const ready = sheetCount >= need && need > 0;
+        const sheetCount = await eligibleSheetCount(cycle.id, subject.id, directors.map((x) => x.id));
+        const ready = votingOpens(policy, directors.length, sheetCount);
         if (!ready && !voted) continue;
         tasks.push({
           key: `vote:${cycle.id}:${subject.id}:${personId}`,
           title: voted ? `You voted · ${subject.full_name}` : `Accept the average · ${subject.full_name}`,
           body: voted
             ? "Your accept or decline is recorded."
-            : "All scores are in. Cast your own vote on the average.",
+            : "Voting is open. Review the evidence, then accept or decline the average. You don't need to score first.",
           href: `/performance/${cycle.id}/subject/${subject.id}/vote`,
           dueOn: d.votesDueOn,
           kind: "vote",

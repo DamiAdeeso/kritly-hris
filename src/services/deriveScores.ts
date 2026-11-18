@@ -82,10 +82,23 @@ export function normalizeSheet(body: SealedSheetBody, policy: PolicyBody): Seale
   };
 }
 
+/** Sealed sheets required before voting opens: the policy minimum, never more than the eligible directors. */
+export function sheetsNeededToVote(policy: PolicyBody, eligibleCount: number) {
+  return Math.min(Math.max(1, policy.voting.min_sealed_sheets_to_vote), eligibleCount);
+}
+
+/** Voting on the average opens once the minimum number of eligible directors have sealed a sheet. */
+export function votingOpens(policy: PolicyBody, eligibleCount: number, eligibleSheetCount: number) {
+  return eligibleCount > 0 && eligibleSheetCount >= sheetsNeededToVote(policy, eligibleCount);
+}
+
 export type DecisionBoard = {
   eligibleCount: number;
   sheetCount: number;
-  complete: boolean;
+  /** Sealed sheets needed before voting opens (policy minimum, capped at the eligible count). */
+  sheetsNeeded: number;
+  /** Enough sealed sheets are in for disinterested directors to accept or decline the average. */
+  votingOpen: boolean;
   perScorer: Array<{
     scorerId: string;
     scorerName: string;
@@ -116,7 +129,10 @@ export function buildDecisionBoard(input: {
   eligible: Array<{ id: string; full_name: string }>;
   sheets: Array<{ scorer_person_id: string; scorer_name: string; body_json: string }>;
 }): DecisionBoard {
-  const { policy, eligible, sheets } = input;
+  const { policy, eligible } = input;
+  // Only Disinterested Directors' sheets feed the average (Founders' Agreement §7.4).
+  const eligibleIds = new Set(eligible.map((e) => e.id));
+  const sheets = input.sheets.filter((s) => eligibleIds.has(s.scorer_person_id));
   const perScorer = sheets.map((s) => {
     const parsed = parseSealedBody(s.body_json) ?? {
       initiatives: [],
@@ -202,7 +218,8 @@ export function buildDecisionBoard(input: {
   return {
     eligibleCount: eligible.length,
     sheetCount: perScorer.length,
-    complete: perScorer.length >= eligible.length && eligible.length > 0,
+    sheetsNeeded: sheetsNeededToVote(policy, eligible.length),
+    votingOpen: votingOpens(policy, eligible.length, perScorer.length),
     perScorer,
     averageRaw,
     derivedAverageRating,
