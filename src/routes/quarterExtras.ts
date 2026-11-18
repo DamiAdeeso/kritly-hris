@@ -1,5 +1,4 @@
 import type express from "express";
-import fs from "node:fs";
 import { prisma } from "../db.js";
 import { can } from "../rbac.js";
 import { escapeHtml } from "../util.js";
@@ -20,7 +19,6 @@ import {
 } from "../services/reviewService.js";
 import {
   EVIDENCE_MAX_BYTES,
-  absoluteEvidencePath,
   canAccessEvidenceFile,
   listEvidenceFiles,
   saveEvidenceFile,
@@ -41,6 +39,7 @@ import {
   getPlan,
 } from "../services/escalationService.js";
 import { singleFileUpload } from "../multipart.js";
+import { openEvidence } from "../services/evidenceStorage.js";
 import { isInitiativeStatus } from "../initiativeStatus.js";
 
 type RouteFn = (req: express.Request, res: express.Response) => void | Promise<void>;
@@ -339,14 +338,24 @@ export function registerQuarterExtras(
         res.status(403).send(await page(req, "Forbidden", "Forbidden"));
         return;
       }
-      const full = absoluteEvidencePath(file.stored_name);
-      if (!fs.existsSync(full)) {
-        res.status(404).send(await page(req, "Not found", "File missing on disk"));
+      const stream = await openEvidence(file.storage, file.stored_name);
+      if (!stream) {
+        res
+          .status(404)
+          .send(
+            await page(
+              req,
+              "File unavailable",
+              `<p>This file is no longer available. The founder needs to upload it again under <strong>My evidence</strong>.</p>`
+            )
+          );
         return;
       }
       res.setHeader("Content-Type", file.mime);
-      res.setHeader("Content-Disposition", `inline; filename="${file.original_name.replace(/"/g, "")}"`);
-      fs.createReadStream(full).pipe(res);
+      res.setHeader("Content-Disposition", `inline; filename="${file.original_name.replace(/["\r\n]/g, "")}"`);
+      res.setHeader("Cache-Control", "private, no-store");
+      stream.on("error", (err) => (res.headersSent ? res.destroy(err) : res.status(500).end()));
+      stream.pipe(res);
     })
   );
 
@@ -648,6 +657,36 @@ export function registerQuarterExtras(
         res.status(400).send(await page(req, "Error", `<p class="err">Choose a status: Not started, In progress, Blocked or Done.</p>`));
         return;
       }
+      const back = `/performance/${req.params.cycleId}/self#ini-${encodeURIComponent(req.params.initiativeId)}`;
+      // Store the file before touching status, so a failed upload changes nothing and can simply be retried.
+      const file = req.uploadedFile;
+      if (file && file.size > 0 && file.originalname) {
+        try {
+          await saveEvidenceFile({
+            initiativeId: req.params.initiativeId,
+            uploaderId: req.person!.id,
+            originalName: file.originalname,
+            mime: file.mimetype,
+            sizeBytes: file.size,
+            buffer: file.buffer,
+          });
+        } catch (e) {
+          const err = e as Error & { status?: number };
+          const status = err.status ?? 502;
+          if (!err.status) console.error("[evidence] upload failed", e);
+          const msg = err.status ? err.message : "The file could not be saved. Nothing was changed — please try again.";
+          res
+            .status(status)
+            .send(
+              await page(
+                req,
+                "Upload failed",
+                `<p class="err">${escapeHtml(msg)}</p><p><a class="btn" href="${back}">Back to My evidence</a></p>`
+              )
+            );
+          return;
+        }
+      }
       const evidenceRef = String(req.body.evidence_ref || "").trim();
       await prisma.initiative.update({
         where: { id: req.params.initiativeId },
@@ -666,17 +705,6 @@ export function registerQuarterExtras(
           created_at: new Date().toISOString(),
         },
       });
-      const file = req.uploadedFile;
-      if (file && file.size > 0 && file.originalname) {
-        await saveEvidenceFile({
-          initiativeId: req.params.initiativeId,
-          uploaderId: req.person!.id,
-          originalName: file.originalname,
-          mime: file.mimetype,
-          sizeBytes: file.size,
-          buffer: file.buffer,
-        });
-      }
       res.redirect(
         `/performance/${req.params.cycleId}/self?saved=${encodeURIComponent(req.params.initiativeId)}#ini-${encodeURIComponent(req.params.initiativeId)}`
       );

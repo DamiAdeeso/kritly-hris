@@ -252,6 +252,7 @@ model EvidenceFile {
   initiative_id String
   original_name String
   stored_name   String
+  storage       String @default("local")
   mime          String
   size_bytes    Int
   uploaded_by   String

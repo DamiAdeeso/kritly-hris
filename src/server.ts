@@ -62,7 +62,8 @@ import {
   deriveOverallFromDimensions,
 } from "./services/deriveScores.js";
 import { confirmScheduleA, issueVestingForCycle } from "./services/equityService.js";
-import { ensureEvidenceDir, listEvidenceFiles } from "./services/evidenceService.js";
+import { listEvidenceFiles } from "./services/evidenceService.js";
+import { checkEvidenceStorage } from "./services/evidenceStorage.js";
 import { listAffiliatesForPerson } from "./services/peopleService.js";
 import { registerQuarterExtras } from "./routes/quarterExtras.js";
 import {
@@ -126,7 +127,6 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, "..", "public")));
-ensureEvidenceDir();
 
 registerNaiReadRoutes(app, route);
 
@@ -938,7 +938,7 @@ app.get("/performance/:cycleId/self", route(async (req, res) => {
                   </select>
                 </div>
                 <div class="field"><label>Evidence link or path</label><input name="evidence_ref" value="${escapeHtml(String(i.evidence_ref ?? ""))}" placeholder="repo path, doc, or URL" /></div>
-                <div class="field span-2"><label>Or upload a file (pdf, png, jpg, docx, txt, md · 15 MB)</label><input type="file" name="evidence_file" /></div>
+                <div class="field span-2"><label>Or upload a file (pdf, png, jpg, docx, txt, md · 15 MB)</label><input type="file" name="evidence_file" accept=".pdf,.png,.jpg,.jpeg,.docx,.txt,.md" /></div>
                 <div class="field span-2"><label>One-line note</label><input name="note" required placeholder="What changed and what’s blocked" /></div>
               </div>
               <div class="form-actions"><button type="submit">Save evidence &amp; status</button></div>
@@ -2633,6 +2633,7 @@ app.post("/internal/approvals/execute", express.json(), route(async (req, res) =
 async function boot() {
   await migrate();
   await syncRolePermissions();
+  await checkEvidenceStorage();
   app.listen(port, () => {
     console.log(`Kritly HRIS listening on http://localhost:${port}`);
   });

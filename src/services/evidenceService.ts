@@ -1,13 +1,9 @@
-import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { prisma } from "../db.js";
 import { can } from "../rbac.js";
 import { id, nowIso } from "../util.js";
 import { isAffiliate } from "./reviewService.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const EVIDENCE_DIR = path.join(__dirname, "..", "..", "data", "evidence");
+import { S3_STORAGE, deleteEvidence, putEvidence } from "./evidenceStorage.js";
 
 export const EVIDENCE_ALLOWED_MIME = new Set([
   "application/pdf",
@@ -19,10 +15,6 @@ export const EVIDENCE_ALLOWED_MIME = new Set([
 ]);
 
 export const EVIDENCE_MAX_BYTES = 15 * 1024 * 1024;
-
-export function ensureEvidenceDir() {
-  fs.mkdirSync(EVIDENCE_DIR, { recursive: true });
-}
 
 export async function initiativeHasEvidence(initiativeId: string) {
   const row = await prisma.initiative.findUnique({
@@ -69,24 +61,30 @@ export async function saveEvidenceFile(input: {
   if (input.sizeBytes > EVIDENCE_MAX_BYTES) {
     throw Object.assign(new Error("File exceeds 15 MB limit"), { status: 400 });
   }
-  ensureEvidenceDir();
   const fileId = id("efile");
-  const ext = path.extname(input.originalName).slice(0, 12) || ".bin";
+  const ext = path.extname(input.originalName).slice(0, 12).replace(/[^.\w-]/g, "") || ".bin";
   const storedName = `${fileId}${ext}`;
-  const dest = path.join(EVIDENCE_DIR, storedName);
-  fs.writeFileSync(dest, input.buffer);
-  await prisma.evidenceFile.create({
-    data: {
-      id: fileId,
-      initiative_id: input.initiativeId,
-      original_name: input.originalName,
-      stored_name: storedName,
-      mime: input.mime || "application/octet-stream",
-      size_bytes: input.sizeBytes,
-      uploaded_by: input.uploaderId,
-      created_at: nowIso(),
-    },
-  });
+  const mime = input.mime || "application/octet-stream";
+  // Bytes first, then the row: a row never points at a file that was not stored.
+  await putEvidence(storedName, input.buffer, mime);
+  try {
+    await prisma.evidenceFile.create({
+      data: {
+        id: fileId,
+        initiative_id: input.initiativeId,
+        original_name: input.originalName,
+        stored_name: storedName,
+        storage: S3_STORAGE,
+        mime,
+        size_bytes: input.sizeBytes,
+        uploaded_by: input.uploaderId,
+        created_at: nowIso(),
+      },
+    });
+  } catch (err) {
+    await deleteEvidence(storedName).catch(() => {});
+    throw err;
+  }
   return fileId;
 }
 
@@ -111,13 +109,4 @@ export async function canAccessEvidenceFile(viewerId: string, fileId: string) {
     return file;
   }
   return null;
-}
-
-export function absoluteEvidencePath(storedName: string) {
-  const base = path.resolve(EVIDENCE_DIR);
-  const full = path.resolve(path.join(EVIDENCE_DIR, storedName));
-  if (!full.startsWith(base + path.sep) && full !== base) {
-    throw Object.assign(new Error("Invalid path"), { status: 400 });
-  }
-  return full;
 }
