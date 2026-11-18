@@ -632,6 +632,8 @@ export function registerNaiReadRoutes(
             typeof body.automatic_consequence === "string"
               ? body.automatic_consequence
               : null,
+          // Same anonymised director feedback the memo page shows (Director A, B, …).
+          feedback: Array.isArray(body.feedback) ? body.feedback : [],
         });
       } catch {
         fail(res, 403);

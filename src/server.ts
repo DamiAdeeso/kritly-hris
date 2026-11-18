@@ -4,7 +4,7 @@ import path from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { migrate, prisma } from "./db.js";
-import { layout, pageHeader, crumbs, statusPill, emptyState, callout, evidenceFileList, avatar, authLoginBody, authForgotBody, authResetBody } from "./views.js";
+import { layout, pageHeader, crumbs, statusPill, emptyState, callout, evidenceFileList, memoFeedbackHtml, avatar, authLoginBody, authForgotBody, authResetBody } from "./views.js";
 import {
   login,
   logout,
@@ -1094,6 +1094,8 @@ app.get("/performance/:cycleId/subject/:employmentId", route(async (req, res) =>
     (i) => !String(i.evidence_ref || "").trim() && !(filesByIni.get(i.id) || []).some(isEvidenceAvailable)
   );
   const lostFiles = [...filesByIni.values()].flat().filter((f) => !isEvidenceAvailable(f)).length;
+  // The founder sees their initiative scores only once ratings are published, with their memo.
+  const scoresVisible = Boolean(cycle.ratings_published) || req.person!.id !== subject.person_id;
   res.send(
     await page(
       req,
@@ -1138,7 +1140,7 @@ app.get("/performance/:cycleId/subject/:employmentId", route(async (req, res) =>
         .map((i) => {
           const updates = updatesByIni.get(i.id) || [];
           return `<div class="card">
-            <div class="card-head"><h2>${escapeHtml(String(i.title))}</h2>${i.final_score ? statusPill(String(i.final_score), String(i.final_score) === "Miss" ? "bad" : "ok") : statusPill("Pending", "neutral")}</div>
+            <div class="card-head"><h2>${escapeHtml(String(i.title))}</h2>${i.final_score && scoresVisible ? statusPill(String(i.final_score), String(i.final_score) === "Miss" ? "bad" : "ok") : statusPill("Pending", "neutral")}</div>
             <dl class="kv">
               <dt>Objective</dt><dd>${escapeHtml(String(i.company_objective))}</dd>
               <dt>Success criteria</dt><dd>${escapeHtml(String(i.success_criteria))}</dd>
@@ -1797,14 +1799,8 @@ app.get("/memos/:id", route(async (req, res) => {
             </tbody>
           </table>
         </div>
-        <div class="section-label">Dimension notes</div>
-        <div class="card">
-          <dl class="kv">
-            ${Object.entries(body.dimension_notes || {})
-              .map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd>`)
-              .join("")}
-          </dl>
-        </div>`
+        <div class="section-label">Feedback from directors</div>
+        ${memoFeedbackHtml(Array.isArray(body.feedback) ? body.feedback : [])}`
       )
     );
   } catch (e) {

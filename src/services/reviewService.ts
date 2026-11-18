@@ -5,7 +5,7 @@ import { consequenceForRating, type PolicyBody } from "../policy.js";
 import { getPolicyById } from "./policyService.js";
 import { addDays, id, nowIso } from "../util.js";
 import { cycleDeadlines, notifyPerson } from "./notificationService.js";
-import { synthesizeDimensionNotes, buildDecisionBoard } from "./deriveScores.js";
+import { buildDecisionBoard, buildMemoFeedback, type MemoFeedback } from "./deriveScores.js";
 import { assertCycleAdopted } from "./cycleGuards.js";
 
 /** Pure rule: all eligible directors voted and accepts are below majority. */
@@ -310,15 +310,16 @@ export async function castBallot(input: {
 
   const rating = board.derivedAverageRating;
   const missed = rating <= 2 ? board.suggestedMissedCriterion : undefined;
-  const notes = synthesizeDimensionNotes(board, policy);
-  notes._adoption = `Majority accepted derived average ${rating} (${accepts.length} of ${disinterested.length}; raw mean ${board.averageRaw.toFixed(2)}).`;
+  const feedback = buildMemoFeedback(board, policy);
+  const adoptionNote = `Majority accepted derived average ${rating} (${accepts.length} of ${disinterested.length}; raw mean ${board.averageRaw.toFixed(2)}).`;
   const result = await castVote({
     actorId: input.actorId,
     cycleId: input.cycleId,
     subjectEmploymentId: input.subjectEmploymentId,
     rating,
     missedCriterion: missed || undefined,
-    dimensionNotes: notes,
+    feedback,
+    adoptionNote,
     initiativeScores: board.initiativeConsensus.map((i) => ({
       initiativeId: i.initiativeId,
       title: i.title,
@@ -380,6 +381,10 @@ export async function returnSubjectToScoring(input: {
     );
   }
 
+  // The sheets hold directors' written feedback; keep a record before clearing them for a rescore.
+  const clearedSheets = await prisma.sealedScoreSheet.findMany({
+    where: { cycle_id: input.cycleId, subject_employment_id: input.subjectEmploymentId },
+  });
   await prisma.$transaction(async (tx) => {
     await tx.adoptionBallot.deleteMany({
       where: { cycle_id: input.cycleId, subject_employment_id: input.subjectEmploymentId },
@@ -396,7 +401,8 @@ export async function returnSubjectToScoring(input: {
     action: "review.return_to_scoring",
     entityType: "employment",
     entityId: input.subjectEmploymentId,
-    after: { cycleId: input.cycleId, ballotsCleared: ballots.length },
+    before: { sealedSheets: clearedSheets },
+    after: { cycleId: input.cycleId, ballotsCleared: ballots.length, sheetsCleared: clearedSheets.length },
   });
   return { cleared: true as const };
 }
@@ -407,7 +413,9 @@ export async function castVote(input: {
   subjectEmploymentId: string;
   rating: number;
   missedCriterion?: string;
-  dimensionNotes: Record<string, string>;
+  /** Anonymised director feedback, carried into the founder's memo on publish. */
+  feedback: MemoFeedback;
+  adoptionNote: string;
   initiativeScores: { initiativeId: string; title?: string; score: string; evidence: string }[];
   voterIds: string[];
 }) {
@@ -452,10 +460,10 @@ export async function castVote(input: {
     for (const is of input.initiativeScores) {
       await tx.initiative.updateMany({
         where: { id: is.initiativeId, cycle_id: input.cycleId },
+        // The founder's reported status stays as they set it; the score lives in final_score.
         data: {
           final_score: is.score,
           final_evidence: is.evidence,
-          status: is.score === "Deferred" ? "Deferred" : is.score,
         },
       });
     }
@@ -466,7 +474,7 @@ export async function castVote(input: {
         subject_employment_id: input.subjectEmploymentId,
         rating: input.rating,
         missed_criterion: input.missedCriterion ?? null,
-        dimension_notes_json: JSON.stringify(input.dimensionNotes),
+        dimension_notes_json: JSON.stringify({ feedback: input.feedback, adoption: input.adoptionNote }),
         initiative_scores_json: JSON.stringify(input.initiativeScores),
         voter_ids_json: JSON.stringify(input.voterIds),
         consequence,
@@ -528,7 +536,7 @@ export async function publishRatings(actorId: string, cycleId: string) {
         review_date: vote.voted_at.slice(0, 10),
         disinterested_directors_voting: voterNames,
         initiatives: JSON.parse(vote.initiative_scores_json),
-        dimension_notes: JSON.parse(vote.dimension_notes_json),
+        ...memoFeedbackFields(vote.dimension_notes_json),
         overall_rating: vote.rating,
         automatic_consequence: vote.consequence,
         prior_quarter_rating: vote.prior_rating,
@@ -628,4 +636,17 @@ export async function getMemoForViewer(viewerId: string, memoId: string) {
   if (await can(viewerId, "memo.read_all")) return memo;
   if ((await can(viewerId, "memo.read_own")) && emp.person_id === viewerId && memo.delivered_at) return memo;
   throw Object.assign(new Error("Forbidden"), { status: 403 });
+}
+
+/** Memo fields from a vote's stored feedback ({ feedback, adoption }). */
+function memoFeedbackFields(raw: string): { feedback: MemoFeedback; adoption_note: string } {
+  try {
+    const parsed = JSON.parse(raw) as { feedback?: MemoFeedback; adoption?: string };
+    return {
+      feedback: Array.isArray(parsed.feedback) ? parsed.feedback : [],
+      adoption_note: typeof parsed.adoption === "string" ? parsed.adoption : "",
+    };
+  } catch {
+    return { feedback: [], adoption_note: "" };
+  }
 }

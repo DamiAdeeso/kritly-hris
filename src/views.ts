@@ -214,6 +214,32 @@ export function callout(message: string, tone: "" | "warn" = "") {
   return `<div class="callout${tone ? ` ${tone}` : ""}">${escapeHtml(message)}</div>`;
 }
 
+/** Director feedback in a founder's memo: per dimension, the board average and each unnamed director's score and note. */
+export function memoFeedbackHtml(
+  feedback: Array<{
+    label: string;
+    average: number;
+    directors: Array<{ label: string; score: number | null; note: string }>;
+  }>
+) {
+  if (!feedback.length) return emptyState("No director feedback was recorded for this review.");
+  return feedback
+    .map(
+      (dim) => `<div class="card">
+        <div class="card-head"><h2>${escapeHtml(dim.label)}</h2>${statusPill(`Board average ${dim.average}/5`, "neutral")}</div>
+        <ul class="feedback-list">${dim.directors
+          .map(
+            (d) => `<li>
+              <div class="feedback-head"><strong>${escapeHtml(d.label)}</strong><span class="muted">${d.score == null ? "Not scored" : `${d.score}/5`}</span></div>
+              ${d.note ? `<p>${escapeHtml(d.note).replaceAll("\n", "<br/>")}</p>` : `<p class="muted">No written feedback.</p>`}
+            </li>`
+          )
+          .join("")}</ul>
+      </div>`
+    )
+    .join("");
+}
+
 /** Evidence files for a task. Files whose bytes were lost read as "Lost", not as dead links. */
 export function evidenceFileList(
   files: { id: string; original_name: string; storage: string }[],

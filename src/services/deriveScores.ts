@@ -95,6 +95,7 @@ export type DecisionBoard = {
     proposedRating: number;
     missedCriterion: string;
     dimensionScores: Record<string, number>;
+    dimensionNotes: Record<string, string>;
     initiatives: SealedSheetBody["initiatives"];
   }>;
   averageRaw: number;
@@ -131,6 +132,7 @@ export function buildDecisionBoard(input: {
       proposedRating: norm.derivedRating,
       missedCriterion: String(norm.missedCriterion ?? ""),
       dimensionScores: norm.dimensionScores,
+      dimensionNotes: norm.dimensionNotes ?? {},
       initiatives: norm.initiatives ?? [],
     };
   });
@@ -210,17 +212,41 @@ export function buildDecisionBoard(input: {
   };
 }
 
-export function synthesizeDimensionNotes(
+/** What the founder reads per dimension: the board average and each director's score and note, unnamed. */
+export type MemoFeedback = Array<{
+  key: string;
+  label: string;
+  average: number;
+  directors: Array<{ label: string; score: number | null; note: string }>;
+}>;
+
+/**
+ * Director feedback for the founder's memo. Directors are labelled "Director A", "Director B", …
+ * in a random order (the same label across every dimension), so the label carries no hint of
+ * who wrote what.
+ */
+export function buildMemoFeedback(
   board: DecisionBoard,
-  policy: PolicyBody
-): Record<string, string> {
-  const notes: Record<string, string> = {};
-  for (const dim of policy.dimensions) {
-    const avg = board.dimensionAverages[dim.key];
-    const parts = board.perScorer
-      .map((s) => `${s.scorerName}: ${s.dimensionScores[dim.key] ?? "—"}`)
-      .join("; ");
-    notes[dim.key] = `Board average ${avg}/5. ${parts}`;
+  policy: PolicyBody,
+  random: () => number = Math.random
+): MemoFeedback {
+  const scorers = [...board.perScorer];
+  for (let i = scorers.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [scorers[i], scorers[j]] = [scorers[j]!, scorers[i]!];
   }
-  return notes;
+  const labelled = scorers.map((s, i) => ({ s, label: `Director ${String.fromCharCode(65 + i)}` }));
+  return policy.dimensions.map((dim) => ({
+    key: dim.key,
+    label: dim.label,
+    average: board.dimensionAverages[dim.key] ?? 0,
+    directors: labelled.map(({ s, label }) => {
+      const score = Number(s.dimensionScores[dim.key]);
+      return {
+        label,
+        score: Number.isFinite(score) ? score : null,
+        note: String(s.dimensionNotes[dim.key] ?? "").trim(),
+      };
+    }),
+  }));
 }
