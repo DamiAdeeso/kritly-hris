@@ -751,9 +751,16 @@ app.get("/performance/:cycleId", route(async (req, res) => {
         } else if (!iVote) {
           statusLabel = "Recused";
         } else if (vote) {
-          statusLabel = cycle.ratings_published ? `Rating ${vote.rating}` : "Adopted";
-          tone = vote.consequence === "pip_trigger" ? "bad" : vote.consequence === "observation" ? "warn" : "ok";
-          action = `<a class="btn secondary" href="/performance/${cycle.id}/subject/${s.id}/vote">View</a>`;
+          // Adopted, but an eligible director who hasn't recorded their own vote can still do so until publish.
+          if (!cycle.ratings_published && !mine) {
+            statusLabel = "Record vote";
+            tone = "warn";
+            action = `<a class="btn" href="/performance/${cycle.id}/subject/${s.id}/vote">Record vote</a>`;
+          } else {
+            statusLabel = cycle.ratings_published ? `Rating ${vote.rating}` : "Adopted";
+            tone = vote.consequence === "pip_trigger" ? "bad" : vote.consequence === "observation" ? "warn" : "ok";
+            action = `<a class="btn secondary" href="/performance/${cycle.id}/subject/${s.id}/vote">View</a>`;
+          }
         } else if (allBallotsIn) {
           statusLabel = "Not adopted";
           tone = "bad";
@@ -1715,13 +1722,14 @@ app.get("/performance/:cycleId/subject/:employmentId/vote", route(async (req, re
           </ul>
         </div>
         ${
-          existing || mine || !eligibleHere || !board.votingOpen
+          mine || !eligibleHere || !board.votingOpen
             ? mine
               ? callout(`Your vote is recorded: ${mine.decision === "accept" ? "accepted" : "declined"} the average.`)
               : !eligibleHere
                 ? callout("You are recused from this vote.")
                 : ""
-            : `<div class="section-label">Your vote</div>
+            : `<div class="section-label">${existing ? "Your vote (for the record)" : "Your vote"}</div>
+        ${existing ? callout(`Rating ${existing.rating} is already adopted. Your vote is recorded for completeness and will not change it.`) : ""}
         <form class="card no-print" method="post" action="/performance/${cycle.id}/subject/${subject.id}/vote">
           <div class="choice">
             <label>
@@ -1741,7 +1749,7 @@ app.get("/performance/:cycleId/subject/:employmentId/vote", route(async (req, re
               <span>I have reviewed ${escapeHtml(subject.full_name)}'s evidence packet${iSealed ? "" : " (initiatives, evidence and self-assessment)"}</span>
             </label>
           </div>
-          <div class="form-actions"><button type="submit">Submit my vote</button></div>
+          <div class="form-actions"><button type="submit">${existing ? "Record my vote" : "Submit my vote"}</button></div>
         </form>`
         }`
       )

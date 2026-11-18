@@ -243,7 +243,11 @@ export async function listBallots(cycleId: string, subjectEmploymentId: string) 
   }));
 }
 
-/** One director accepts or declines the derived average. Adoption is written only when accepts reach a majority. */
+/**
+ * One director accepts or declines the derived average. Adoption is written when accepts first reach a
+ * majority; after that the rating is frozen, but the remaining eligible directors may still record their
+ * accept or decline for the record, right up until ratings are published.
+ */
 export async function castBallot(input: {
   actorId: string;
   cycleId: string;
@@ -263,9 +267,10 @@ export async function castBallot(input: {
     where: {
       cycle_id_subject_employment_id: { cycle_id: input.cycleId, subject_employment_id: input.subjectEmploymentId },
     },
-    select: { id: true },
+    select: { id: true, rating: true },
   });
-  if (existingOfficial) throw Object.assign(new Error("Rating already adopted"), { status: 400 });
+  // Once adopted, further ballots are recorded for completeness but do not re-open or change the rating.
+  const alreadyAdopted = Boolean(existingOfficial);
 
   const policy = await policyForCycle(cycle);
   const subject = await prisma.employment.findUniqueOrThrow({
@@ -307,7 +312,8 @@ export async function castBallot(input: {
       { status: 400 }
     );
   }
-  if (input.decision === "accept" && board.derivedAverageRating <= 2 && !board.suggestedMissedCriterion) {
+  // This guard protects the rating being written. Once adopted, a record-only ballot doesn't write one.
+  if (!alreadyAdopted && input.decision === "accept" && board.derivedAverageRating <= 2 && !board.suggestedMissedCriterion) {
     throw Object.assign(
       new Error("Average is 1 or 2 but no missed criterion was named on the score sheets"),
       { status: 400 }
@@ -341,8 +347,21 @@ export async function castBallot(input: {
       averageAtVote: board.derivedAverageRating,
       sheetsAtVote: board.sheetCount,
       reviewedEvidence: true,
+      afterAdoption: alreadyAdopted,
     },
   });
+
+  // Rating already stood before this ballot: recorded for the record, nothing to adopt or change.
+  if (alreadyAdopted) {
+    return {
+      adopted: true as const,
+      recordedAfterAdoption: true as const,
+      rating: existingOfficial!.rating,
+      accepts: accepts.length,
+      declines: ballots.length - accepts.length,
+      need,
+    };
+  }
 
   if (accepts.length < need) {
     return { adopted: false as const, accepts: accepts.length, declines: ballots.length - accepts.length, need };

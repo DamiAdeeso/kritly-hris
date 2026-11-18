@@ -313,7 +313,8 @@ export async function tasksForPerson(personId: string): Promise<PersonTask[]> {
       }
     }
 
-    if (await can(personId, "review.vote")) {
+    // Voting (incl. recording a vote after a rating is adopted) stays open until ratings are published.
+    if ((await can(personId, "review.vote")) && !cycle.ratings_published) {
       const subjects = await subjectEmployments(cycle.id);
       for (const subject of subjects) {
         const directors = await disinterestedDirectors(subject.person_id, policy);
